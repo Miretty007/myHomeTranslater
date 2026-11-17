@@ -24,6 +24,7 @@ final class AppController: NSObject, NSApplicationDelegate, NSMenuDelegate {
     private var pending: Task<Void, Never>?
     private var firstOpen: Task<Void, Never>?
     private var panel: TranslationPanel?
+    private let panelState = PanelState()
     private var request: TranslationRequest?
     private var presentation = UUID()
     private var passivePanel = false
@@ -122,7 +123,7 @@ final class AppController: NSObject, NSApplicationDelegate, NSMenuDelegate {
         if settingsWindow == nil {
             let view = SettingsView(preferences: preferences, changeShortcut: { [weak self] in self?.registerShortcut($0) },
                                     requestAccess: { [weak self] in self?.requestAccess() })
-            let window = NSWindow(contentRect: NSRect(x: 0, y: 0, width: 540, height: 432),
+            let window = NSWindow(contentRect: NSRect(x: 0, y: 0, width: 540, height: 480),
                                   styleMask: [.titled, .closable, .miniaturizable], backing: .buffered, defer: false)
             window.title = "Настройки myHomeTranslater"
             window.contentView = NSHostingView(rootView: view)
@@ -242,7 +243,7 @@ final class AppController: NSObject, NSApplicationDelegate, NSMenuDelegate {
             return
         }
         pending = Task {
-            if automatic { try? await Task.sleep(for: .milliseconds(420)) }
+            if automatic { try? await Task.sleep(for: .milliseconds(preferences.delayMilliseconds)) }
             guard !Task.isCancelled else { return }
             let selection = await reader.read(pid: pid)
             guard !Task.isCancelled, NSWorkspace.shared.frontmostApplication?.processIdentifier == pid else { return }
@@ -274,28 +275,29 @@ final class AppController: NSObject, NSApplicationDelegate, NSMenuDelegate {
         if case .request(let newRequest) = content { request = newRequest } else { request = nil }
         let id = UUID()
         presentation = id
-        anchor = position
+        if !panelState.isPinned { anchor = position }
         passivePanel = passive
         let window = panel ?? makePanel()
         panel = window
-        let view = PanelView(content: content, preferences: preferences, close: { [weak self] in self?.dismissPanel() },
+        updateAvailableSize()
+        let view = PanelView(content: content, preferences: preferences, state: panelState,
+                             togglePin: { [weak self] in self?.togglePin() },
+                             close: { [weak self] in self?.dismissPanel() },
                              settings: { [weak self] in self?.showSettings() },
                              repeatRequest: { [weak self] source in
             guard let self, let text = request?.text else { return }
             present(text: text, source: source, anchor: anchor, passive: false)
         })
-        .frame(width: 384)
-        .fixedSize(horizontal: false, vertical: true)
-        .onGeometryChange(for: CGFloat.self, of: { $0.size.height }) { [weak self] height in
+        .onGeometryChange(for: CGSize.self, of: { $0.size }) { [weak self] size in
             Task { @MainActor in
                 guard let self, self.presentation == id else { return }
-                self.resizePanel(height: height)
+                self.resizePanel(to: size)
             }
         }
         let host = NSHostingView(rootView: view)
         host.sizingOptions = []
         window.contentView = host
-        resizePanel(height: max(100, host.fittingSize.height))
+        resizePanel(to: host.fittingSize)
         if passive { window.orderFrontRegardless() } else { window.makeKeyAndOrderFront(nil) }
         refreshMonitors()
     }
@@ -312,23 +314,52 @@ final class AppController: NSObject, NSApplicationDelegate, NSMenuDelegate {
         window.isOpaque = false
         window.backgroundColor = .clear
         window.collectionBehavior = [.canJoinAllSpaces, .fullScreenAuxiliary, .transient]
+        window.delegate = self
         window.onEscape = { [weak self] in self?.dismissPanel() }
         return window
     }
 
-    private func resizePanel(height: CGFloat) {
+    private var panelScreen: NSScreen? {
+        if panelState.isPinned, let screen = panel?.screen { return screen }
         let point = CGPoint(x: anchor.midX, y: anchor.midY)
-        let screen = NSScreen.screens.first { $0.frame.contains(point) } ?? NSScreen.main
-        guard let visible = screen?.visibleFrame else { return }
-        let frame = PanelPosition.frame(size: CGSize(width: 384, height: ceil(height)), anchor: anchor, visible: visible)
-        panel?.setFrame(frame, display: true)
-        panel?.contentView?.wantsLayer = true
-        panel?.contentView?.layer?.cornerRadius = 14
-        panel?.contentView?.layer?.masksToBounds = true
-        panel?.invalidateShadow()
+        return NSScreen.screens.first { $0.frame.contains(point) } ?? NSScreen.main
+    }
+
+    private func updateAvailableSize() {
+        if let size = panelScreen?.visibleFrame.size, panelState.availableSize != size {
+            panelState.availableSize = size
+        }
+    }
+
+    private func togglePin() {
+        guard let panel else { return }
+        panelState.isPinned.toggle()
+        panel.level = panelState.isPinned ? .statusBar : .floating
+        panel.collectionBehavior = [.canJoinAllSpaces, .fullScreenAuxiliary, panelState.isPinned ? .stationary : .transient]
+        if !panelState.isPinned {
+            // Keep the current position until the next selection.
+            anchor = CGRect(x: panel.frame.minX, y: panel.frame.maxY + 8, width: 0, height: 0)
+        }
+    }
+
+    private func resizePanel(to size: CGSize) {
+        guard let panel, let visible = panelScreen?.visibleFrame, size.width > 0, size.height > 0 else { return }
+        let frame: CGRect
+        if panelState.isPinned {
+            frame = PanelPosition.pinnedFrame(size: size, topLeft: CGPoint(x: panel.frame.minX, y: panel.frame.maxY),
+                                              visible: visible)
+        } else {
+            frame = PanelPosition.frame(size: size, anchor: anchor, visible: visible)
+        }
+        if panel.frame != frame { panel.setFrame(frame, display: true) }
+        panel.contentView?.wantsLayer = true
+        panel.contentView?.layer?.cornerRadius = 14 * preferences.panelZoom.factor
+        panel.contentView?.layer?.masksToBounds = true
+        panel.invalidateShadow()
     }
 
     private func dismissPanel() {
+        guard !panelState.isPinned else { return }
         presentation = UUID()
         request?.cancel()
         request = nil
@@ -348,6 +379,12 @@ final class AppController: NSObject, NSApplicationDelegate, NSMenuDelegate {
     }
 }
 
+extension AppController: NSWindowDelegate {
+    func windowDidChangeScreen(_ notification: Notification) {
+        updateAvailableSize()
+    }
+}
+
 #if DEBUG
 import Translation
 
@@ -356,6 +393,7 @@ extension AppController {
     func verifyApp(in directory: URL) async {
         do {
             try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
+            preferences.panelZoom = .standard
             var report = ["Hotkey registered: \(hotKeyRegistered)", "Accessibility granted: \(AXIsProcessTrusted())"]
             for (source, target, sample) in [("en", "ru", "Good morning!"), ("ru", "en", "Доброе утро!")] {
                 let status = await TranslationLanguages.status(from: .init(identifier: source), to: .init(identifier: target))
@@ -400,6 +438,34 @@ extension AppController {
             try capture(panel, at: directory.appendingPathComponent("panel-long.png"))
             guard let panel, (275...500).contains(panel.frame.height) else { throw CocoaError(.formatting) }
             report.append("Long selection: \(Int(panel.frame.height)) pt")
+            togglePin()
+            guard let screen = panel.screen?.visibleFrame else { throw CocoaError(.formatting) }
+            let topLeft = CGPoint(x: screen.minX + 20, y: screen.maxY - 12)
+            panel.setFrameTopLeftPoint(topLeft)
+            for scale in [PanelZoom.small, .double] {
+                preferences.panelZoom = scale
+                try await Task.sleep(for: .milliseconds(240))
+                guard panel.frame.width == min(384 * scale.factor, screen.width),
+                      screen.contains(panel.frame), panel.frame.minX == topLeft.x,
+                      request === long else { throw CocoaError(.formatting) }
+                try capture(panel, at: directory.appendingPathComponent("pinned-\(scale.rawValue).png"))
+            }
+            preferences.panelZoom = .standard
+            try await Task.sleep(for: .milliseconds(160))
+            let pinnedCorner = CGPoint(x: panel.frame.minX, y: panel.frame.maxY)
+            panel.cancelOperation(nil)
+            showSettings()
+            settingsWindow?.orderOut(nil)
+            guard panel.isVisible, panel.level == .statusBar, request === long else { throw CocoaError(.formatting) }
+            present(text: "Testing again", source: "en", anchor: .zero, passive: true)
+            try await Task.sleep(for: .milliseconds(320))
+            guard panel === self.panel, request?.text == "Testing again", panel.isVisible,
+                  abs(panel.frame.minX - pinnedCorner.x) <= 1,
+                  abs(panel.frame.maxY - pinnedCorner.y) <= 1 else { throw CocoaError(.formatting) }
+            togglePin()
+            panel.cancelOperation(nil)
+            guard !panel.isVisible else { throw CocoaError(.formatting) }
+            report.append("Pin, zoom 75–200%, update in place and unpin: passed")
             dismissPanel()
             try report.joined(separator: "\n").write(to: directory.appendingPathComponent("report.txt"), atomically: true, encoding: .utf8)
             NSApp.terminate(nil)

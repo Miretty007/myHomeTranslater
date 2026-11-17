@@ -15,13 +15,29 @@ import Testing
     defer { defaults.removePersistentDomain(forName: name) }
     let prefs = Preferences(defaults: defaults)
     #expect(!prefs.automatic)
+    #expect(prefs.delayMilliseconds == 420)
+    #expect(prefs.panelZoom == .standard)
     #expect(prefs.shortcut.title == "⌃⌥T")
     prefs.automatic = true
+    prefs.delayMilliseconds = 0
+    prefs.panelZoom = .extraLarge
     prefs.target = "de"
     prefs.shortcut = Shortcut(keyCode: 11, modifiers: 4096, key: "B")
     let restored = Preferences(defaults: defaults)
     #expect(restored.automatic && restored.target == "de")
     #expect(restored.shortcut == prefs.shortcut)
+    #expect(restored.delayMilliseconds == 0)
+    #expect(restored.panelZoom == .extraLarge)
+    defaults.set(5700, forKey: "delayMilliseconds")
+    #expect(Preferences(defaults: defaults).delayMilliseconds == 3000)
+}
+
+@MainActor @Test func pinnedWindowKeepsTopLeftAndFitsDisplay() {
+    let screen = CGRect(x: -1280, y: 0, width: 1280, height: 800)
+    let top = CGPoint(x: -1100, y: 700)
+    let frame = PanelPosition.pinnedFrame(size: CGSize(width: 480, height: 250), topLeft: top, visible: screen)
+    #expect(frame.minX == top.x && frame.maxY == top.y)
+    #expect(PanelPosition.pinnedFrame(size: CGSize(width: 1300, height: 970), topLeft: top, visible: screen) == screen)
 }
 
 @MainActor @Test func staysInsideScreen() {

@@ -4,6 +4,13 @@ import NaturalLanguage
 import Observation
 import Translation
 
+enum PanelZoom: Int, CaseIterable {
+    case small = 75, standard = 100, large = 125, larger = 150, extraLarge = 175, double = 200
+
+    var factor: CGFloat { CGFloat(rawValue) / 100 }
+    var label: String { "\(rawValue) %" }
+}
+
 enum ThemeChoice: String, CaseIterable {
     case system, light, dark
 
@@ -77,6 +84,9 @@ enum TranslationLanguages {
 @MainActor @Observable
 final class Preferences {
     private let defaults: UserDefaults
+    static let delayRange = 0...3000
+    var delayMilliseconds: Int { didSet { defaults.set(delayMilliseconds, forKey: "delayMilliseconds") } }
+    var panelZoom: PanelZoom { didSet { defaults.set(panelZoom.rawValue, forKey: "panelZoom") } }
     var target: String { didSet { defaults.set(target, forKey: "target") } }
     var theme: ThemeChoice { didSet { defaults.set(theme.rawValue, forKey: "theme"); NSApp.appearance = theme.appearance } }
     var automatic: Bool { didSet { defaults.set(automatic, forKey: "automatic"); onAutomaticChange?() } }
@@ -89,6 +99,9 @@ final class Preferences {
 
     init(defaults: UserDefaults = .standard) {
         self.defaults = defaults
+        let delay = defaults.object(forKey: "delayMilliseconds") as? Int ?? 420
+        delayMilliseconds = min(max(delay, Self.delayRange.lowerBound), Self.delayRange.upperBound)
+        panelZoom = PanelZoom(rawValue: defaults.integer(forKey: "panelZoom")) ?? .standard
         target = defaults.string(forKey: "target") ?? "auto"
         theme = ThemeChoice(rawValue: defaults.string(forKey: "theme") ?? "") ?? .system
         automatic = defaults.bool(forKey: "automatic")

@@ -18,6 +18,19 @@ struct SettingsView: View {
                 }
                 Toggle("Переводить сразу после выделения", isOn: $preferences.automatic)
                     .help("Показывать перевод после короткой паузы, сохраняя фокус в исходном приложении")
+                LabeledContent("Задержка после выделения") {
+                    let seconds = Double(preferences.delayMilliseconds) / 1000
+                    let value = seconds.formatted(.number.locale(Locale(identifier: "ru")).precision(.fractionLength(0...2))) + " с"
+                    Slider(value: Binding(get: { Double(preferences.delayMilliseconds) },
+                                          set: { preferences.delayMilliseconds = Int($0.rounded()) }),
+                           in: Double(Preferences.delayRange.lowerBound)...Double(Preferences.delayRange.upperBound),
+                           step: 20)
+                        .frame(width: 140)
+                        .accessibilityLabel("Задержка после выделения")
+                        .accessibilityValue(value)
+                    Text(verbatim: value).monospacedDigit().frame(width: 50, alignment: .trailing)
+                }
+                .disabled(!preferences.automatic)
             }
             Section("Управление") {
                 LabeledContent("Горячая клавиша") {

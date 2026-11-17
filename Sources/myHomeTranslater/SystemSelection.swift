@@ -81,4 +81,12 @@ enum PanelPosition {
         return CGRect(x: min(max(anchor.minX, visible.minX), visible.maxX - width),
                       y: min(max(y, visible.minY), visible.maxY - height), width: width, height: height)
     }
+
+    static func pinnedFrame(size: CGSize, topLeft: CGPoint, visible: CGRect) -> CGRect {
+        let width = min(size.width, visible.width)
+        let height = min(size.height, visible.height)
+        return CGRect(x: min(max(topLeft.x, visible.minX), visible.maxX - width),
+                      y: min(max(topLeft.y - height, visible.minY), visible.maxY - height),
+                      width: width, height: height)
+    }
 }

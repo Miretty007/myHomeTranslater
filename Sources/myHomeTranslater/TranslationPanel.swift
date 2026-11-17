@@ -71,44 +71,120 @@ enum PanelContent {
     case notice(String, String, Bool)
 }
 
+@MainActor @Observable
+final class PanelState {
+    var isPinned = false
+    var availableSize: CGSize = .zero
+}
+
+// A visual scale alone leaves the hosting window at its original size.
+// Measure in logical points, then reserve the scaled bounds in the window.
+private struct ZoomedPanelLayout: Layout {
+    let scale: CGFloat
+    let available: CGSize
+
+    func sizeThatFits(proposal: ProposedViewSize, subviews: Subviews, cache: inout ()) -> CGSize {
+        let width = min(384 * scale, available.width)
+        let content = subviews[0].sizeThatFits(.init(width: width / scale, height: nil))
+        return CGSize(width: width, height: min(ceil(content.height * scale), available.height))
+    }
+
+    func placeSubviews(in bounds: CGRect, proposal: ProposedViewSize, subviews: Subviews, cache: inout ()) {
+        subviews[0].place(at: bounds.origin, anchor: .topLeading,
+                          proposal: .init(width: bounds.width / scale, height: bounds.height / scale))
+    }
+}
+
+private struct PanelDragArea: NSViewRepresentable {
+    final class DragView: NSView {
+        override func acceptsFirstMouse(for event: NSEvent?) -> Bool { true }
+        override func mouseDown(with event: NSEvent) { window?.performDrag(with: event) }
+    }
+
+    func makeNSView(context: Context) -> DragView { DragView() }
+    func updateNSView(_ view: DragView, context: Context) {}
+}
+
 struct PanelView: View {
     let content: PanelContent
     let preferences: Preferences
+    let state: PanelState
+    let togglePin: () -> Void
     let close: () -> Void
     let settings: () -> Void
     let repeatRequest: (String?) -> Void
     @State private var copied = false
 
     var body: some View {
+        let scale = preferences.panelZoom.factor
+        ZoomedPanelLayout(scale: scale, available: state.availableSize) {
+            panelBody.scaleEffect(scale, anchor: .topLeading)
+        }
+        .fixedSize()
+    }
+
+    private var panelBody: some View {
         VStack(alignment: .leading, spacing: 0) {
             HStack(spacing: 8) {
-                Image(systemName: "translate").foregroundStyle(.tint)
-                Text("myHomeTranslater").font(.system(size: 12, weight: .semibold))
-                Spacer()
+                HStack(spacing: 8) {
+                    Image(systemName: "translate").foregroundStyle(.tint)
+                    Text("myHomeTranslater").font(.system(size: 12, weight: .semibold))
+                    Spacer(minLength: 0)
+                }
+                .frame(maxHeight: .infinity)
+                .overlay {
+                    if state.isPinned { PanelDragArea().help("Перетащить закреплённое окно") }
+                }
+                Menu {
+                    Picker("Масштаб окна", selection: Bindable(preferences).panelZoom) {
+                        ForEach(PanelZoom.allCases, id: \.self) { Text(verbatim: $0.label).tag($0) }
+                    }.pickerStyle(.inline)
+                } label: {
+                    Text(verbatim: preferences.panelZoom.label).font(.caption.monospacedDigit())
+                }
+                .menuStyle(.borderlessButton).fixedSize()
+                .help("Изменить масштаб окна").accessibilityLabel("Масштаб окна")
+                .accessibilityValue(preferences.panelZoom.label)
+                iconButton(state.isPinned ? "pin.fill" : "pin",
+                           state.isPinned ? "Открепить окно" : "Закрепить поверх окон", togglePin)
+                    .foregroundStyle(state.isPinned ? AnyShapeStyle(.tint) : AnyShapeStyle(.secondary))
                 iconButton("gearshape", "Открыть настройки", settings)
                 iconButton("xmark", "Закрыть (Esc)", close)
+                    .disabled(state.isPinned)
+                    .help(state.isPinned ? "Чтобы закрыть окно, снимите закрепление" : "Закрыть (Esc)")
             }
             .padding(.horizontal, 16).frame(height: 40)
             Divider()
             switch content {
             case .request(let request):
-                requestBody(request)
+                fittingContent { requestBody(request) }
+                    .task { await request.prepare() }
+                    .translationTask(request.configuration, action: request.translate(using:))
             case .notice(let title, let message, let permission):
-                VStack(alignment: .leading, spacing: 12) {
-                    Text(title).font(.headline)
-                    Text(message).foregroundStyle(.secondary).fixedSize(horizontal: false, vertical: true)
-                    if permission { Button("Открыть настройки", action: settings) }
-                }.padding(16)
+                fittingContent {
+                    VStack(alignment: .leading, spacing: 12) {
+                        Text(title).font(.headline)
+                        Text(message).foregroundStyle(.secondary).fixedSize(horizontal: false, vertical: true)
+                        if permission { Button("Открыть настройки", action: settings) }
+                    }.padding(16)
+                }
             }
         }
         .background(Color(nsColor: .windowBackgroundColor))
         .accessibilityElement(children: .contain)
     }
 
+    private func fittingContent<Content: View>(@ViewBuilder _ body: () -> Content) -> some View {
+        ViewThatFits(in: .vertical) {
+            body().fixedSize(horizontal: false, vertical: true)
+            ScrollView { body() }
+        }
+    }
+
     private func iconButton(_ symbol: String, _ label: String, _ action: @escaping () -> Void) -> some View {
         Button(action: action) {
             Image(systemName: symbol).frame(width: 20, height: 24)
-        }.buttonStyle(.plain).foregroundStyle(.secondary).help(label).accessibilityLabel(label)
+        }.buttonStyle(.plain).help(label).accessibilityLabel(label)
     }
 
     private func requestBody(_ request: TranslationRequest) -> some View {
@@ -159,8 +235,6 @@ struct PanelView: View {
                 }
             }.padding(16)
         }
-        .task { await request.prepare() }
-        .translationTask(request.configuration, action: request.translate(using:))
     }
 
     private func passage(_ text: String, size: CGFloat, limit: CGFloat, secondary: Bool) -> some View {
