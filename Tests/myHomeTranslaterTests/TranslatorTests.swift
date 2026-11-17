@@ -40,6 +40,23 @@ import Testing
     #expect(PanelPosition.pinnedFrame(size: CGSize(width: 1300, height: 970), topLeft: top, visible: screen) == screen)
 }
 
+@MainActor @Test func readingPanelLimitsBothAxesAtEveryZoom() {
+    let state = PanelState()
+    state.availableSize = CGSize(width: 1600, height: 1000)
+    state.readingSize = CGSize(width: 1, height: 1)
+    for zoom in PanelZoom.allCases {
+        let scale = zoom.factor
+        let floor = CGSize(width: 360 * scale, height: 260 * scale)
+        #expect(state.readingFrameSize(scale: scale) == floor)
+        #expect(state.constrainedReadingFrame(CGSize(width: 1, height: 660), scale: scale)
+                == CGSize(width: floor.width, height: 660))
+        #expect(state.constrainedReadingFrame(CGSize(width: 840, height: 1), scale: scale)
+                == CGSize(width: 840, height: floor.height))
+    }
+    state.availableSize = CGSize(width: 640, height: 480)
+    #expect(state.readingFrameSize(scale: 2) == state.availableSize)
+}
+
 @MainActor @Test func staysInsideScreen() {
     let screen = CGRect(x: -1280, y: 0, width: 1280, height: 800)
     let size = CGSize(width: 384, height: 240)

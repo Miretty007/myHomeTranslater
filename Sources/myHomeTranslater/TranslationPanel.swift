@@ -73,14 +73,25 @@ enum PanelContent {
 
 @MainActor @Observable
 final class PanelState {
+    static let minimumReadingSize = CGSize(width: 360, height: 260)
     var isPinned = false
     var availableSize: CGSize = .zero
     // Store the user's reading area in unzoomed points so zoom stays independent.
     var readingSize: CGSize?
 
+    func minimumFrameSize(scale: CGFloat) -> CGSize {
+        CGSize(width: min(Self.minimumReadingSize.width * scale, availableSize.width),
+               height: min(Self.minimumReadingSize.height * scale, availableSize.height))
+    }
+
+    func constrainedReadingFrame(_ proposed: CGSize, scale: CGFloat) -> CGSize {
+        let minimum = minimumFrameSize(scale: scale)
+        return CGSize(width: min(max(proposed.width, minimum.width), availableSize.width),
+                      height: min(max(proposed.height, minimum.height), availableSize.height))
+    }
+
     func readingFrameSize(scale: CGFloat) -> CGSize? {
-        readingSize.map { CGSize(width: min($0.width * scale, availableSize.width),
-                                 height: min($0.height * scale, availableSize.height)) }
+        readingSize.map { constrainedReadingFrame(CGSize(width: $0.width * scale, height: $0.height * scale), scale: scale) }
     }
 }
 

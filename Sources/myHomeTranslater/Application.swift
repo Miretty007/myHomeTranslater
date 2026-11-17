@@ -347,7 +347,7 @@ final class AppController: NSObject, NSApplicationDelegate, NSMenuDelegate {
         let scale = preferences.panelZoom.factor
         let size = panelState.readingFrameSize(scale: scale) ?? measuredSize
         guard size.width > 0, size.height > 0 else { return }
-        panel.minSize = CGSize(width: min(320 * scale, visible.width), height: min(200 * scale, size.height, visible.height))
+        panel.contentMinSize = panelState.minimumFrameSize(scale: scale)
         let frame: CGRect
         if panelState.isPinned || (panelState.readingSize != nil && !newSelection) {
             frame = PanelPosition.pinnedFrame(size: size, topLeft: CGPoint(x: panel.frame.minX, y: panel.frame.maxY),
@@ -385,6 +385,11 @@ final class AppController: NSObject, NSApplicationDelegate, NSMenuDelegate {
 }
 
 extension AppController: NSWindowDelegate {
+    func windowWillResize(_ sender: NSWindow, to frameSize: NSSize) -> NSSize {
+        guard sender === panel, panelState.availableSize != .zero else { return frameSize }
+        return panelState.constrainedReadingFrame(frameSize, scale: preferences.panelZoom.factor)
+    }
+
     func windowDidResize(_ notification: Notification) {
         guard let panel, panel.inLiveResize else { return }
         recordReadingSize(of: panel)
@@ -397,7 +402,7 @@ extension AppController: NSWindowDelegate {
 
     private func recordReadingSize(of panel: NSPanel) {
         let scale = preferences.panelZoom.factor
-        let size = panel.frame.size
+        let size = panelState.constrainedReadingFrame(panel.frame.size, scale: scale)
         panelState.readingSize = CGSize(width: size.width / scale, height: size.height / scale)
     }
 
@@ -473,6 +478,13 @@ extension AppController {
             }
             preferences.panelZoom = .standard
             try await Task.sleep(for: .milliseconds(160))
+            let smallest = windowWillResize(panel, to: CGSize(width: 1, height: 1))
+            let minimumFrame = PanelPosition.pinnedFrame(size: smallest, topLeft: topLeft, visible: screen)
+            panel.setFrame(minimumFrame, display: true)
+            windowDidEndLiveResize(Notification(name: NSWindow.didEndLiveResizeNotification, object: panel))
+            try await Task.sleep(for: .milliseconds(160))
+            guard panel.frame.size == panelState.minimumFrameSize(scale: 1) else { throw CocoaError(.formatting) }
+            try capture(panel, at: directory.appendingPathComponent("panel-minimum.png"))
             // Exercise the same final-frame notification AppKit sends after a corner drag.
             let enlarged = PanelPosition.pinnedFrame(size: CGSize(width: 620, height: 578),
                                                      topLeft: topLeft, visible: screen)
