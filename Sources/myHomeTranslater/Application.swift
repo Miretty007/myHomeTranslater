@@ -297,13 +297,13 @@ final class AppController: NSObject, NSApplicationDelegate, NSMenuDelegate {
         let host = NSHostingView(rootView: view)
         host.sizingOptions = []
         window.contentView = host
-        resizePanel(to: host.fittingSize)
+        resizePanel(to: host.fittingSize, newSelection: true)
         if passive { window.orderFrontRegardless() } else { window.makeKeyAndOrderFront(nil) }
         refreshMonitors()
     }
 
     private func makePanel() -> TranslationPanel {
-        let window = TranslationPanel(contentRect: .zero, styleMask: [.borderless, .nonactivatingPanel],
+        let window = TranslationPanel(contentRect: .zero, styleMask: [.borderless, .nonactivatingPanel, .resizable],
                                       backing: .buffered, defer: false)
         window.title = "Перевод"
         window.isFloatingPanel = true
@@ -342,10 +342,14 @@ final class AppController: NSObject, NSApplicationDelegate, NSMenuDelegate {
         }
     }
 
-    private func resizePanel(to size: CGSize) {
-        guard let panel, let visible = panelScreen?.visibleFrame, size.width > 0, size.height > 0 else { return }
+    private func resizePanel(to measuredSize: CGSize, newSelection: Bool = false) {
+        guard let panel, !panel.inLiveResize, let visible = panelScreen?.visibleFrame else { return }
+        let scale = preferences.panelZoom.factor
+        let size = panelState.readingFrameSize(scale: scale) ?? measuredSize
+        guard size.width > 0, size.height > 0 else { return }
+        panel.minSize = CGSize(width: min(320 * scale, visible.width), height: min(200 * scale, size.height, visible.height))
         let frame: CGRect
-        if panelState.isPinned {
+        if panelState.isPinned || (panelState.readingSize != nil && !newSelection) {
             frame = PanelPosition.pinnedFrame(size: size, topLeft: CGPoint(x: panel.frame.minX, y: panel.frame.maxY),
                                               visible: visible)
         } else {
@@ -367,6 +371,7 @@ final class AppController: NSObject, NSApplicationDelegate, NSMenuDelegate {
         if let sheet = panel?.attachedSheet { panel?.endSheet(sheet, returnCode: .cancel) }
         panel?.orderOut(nil)
         panel?.contentView = nil
+        panelState.readingSize = nil
         refreshMonitors()
     }
 
@@ -380,6 +385,22 @@ final class AppController: NSObject, NSApplicationDelegate, NSMenuDelegate {
 }
 
 extension AppController: NSWindowDelegate {
+    func windowDidResize(_ notification: Notification) {
+        guard let panel, panel.inLiveResize else { return }
+        recordReadingSize(of: panel)
+    }
+
+    func windowDidEndLiveResize(_ notification: Notification) {
+        guard let panel else { return }
+        recordReadingSize(of: panel)
+    }
+
+    private func recordReadingSize(of panel: NSPanel) {
+        let scale = preferences.panelZoom.factor
+        let size = panel.frame.size
+        panelState.readingSize = CGSize(width: size.width / scale, height: size.height / scale)
+    }
+
     func windowDidChangeScreen(_ notification: Notification) {
         updateAvailableSize()
     }
@@ -452,6 +473,15 @@ extension AppController {
             }
             preferences.panelZoom = .standard
             try await Task.sleep(for: .milliseconds(160))
+            // Exercise the same final-frame notification AppKit sends after a corner drag.
+            let enlarged = PanelPosition.pinnedFrame(size: CGSize(width: 620, height: 578),
+                                                     topLeft: topLeft, visible: screen)
+            panel.setFrame(enlarged, display: true)
+            windowDidEndLiveResize(Notification(name: NSWindow.didEndLiveResizeNotification, object: panel))
+            try await Task.sleep(for: .milliseconds(160))
+            guard panel.frame.size == enlarged.size, preferences.panelZoom == .standard,
+                  request === long else { throw CocoaError(.formatting) }
+            try capture(panel, at: directory.appendingPathComponent("panel-resized.png"))
             let pinnedCorner = CGPoint(x: panel.frame.minX, y: panel.frame.maxY)
             panel.cancelOperation(nil)
             showSettings()
@@ -460,11 +490,13 @@ extension AppController {
             present(text: "Testing again", source: "en", anchor: .zero, passive: true)
             try await Task.sleep(for: .milliseconds(320))
             guard panel === self.panel, request?.text == "Testing again", panel.isVisible,
+                  panel.frame.size == enlarged.size,
                   abs(panel.frame.minX - pinnedCorner.x) <= 1,
                   abs(panel.frame.maxY - pinnedCorner.y) <= 1 else { throw CocoaError(.formatting) }
             togglePin()
             panel.cancelOperation(nil)
-            guard !panel.isVisible else { throw CocoaError(.formatting) }
+            guard !panel.isVisible, panelState.readingSize == nil else { throw CocoaError(.formatting) }
+            report.append("User-sized panel retained its dimensions for the next translation")
             report.append("Pin, zoom 75–200%, update in place and unpin: passed")
             dismissPanel()
             try report.joined(separator: "\n").write(to: directory.appendingPathComponent("report.txt"), atomically: true, encoding: .utf8)
