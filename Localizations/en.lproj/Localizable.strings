@@ -1,0 +1,97 @@
+/* Application and menu bar */
+"Настройки…" = "Settings…";
+"Завершить myHomeTranslater" = "Quit myHomeTranslater";
+"Правка" = "Edit";
+"Отменить" = "Undo";
+"Вырезать" = "Cut";
+"Скопировать" = "Copy";
+"Вставить" = "Paste";
+"Выделить всё" = "Select All";
+"Перевести текст…" = "Translate Text…";
+"Настройки myHomeTranslater" = "myHomeTranslater Settings";
+"Выделите слово или фразу." = "Select a word or phrase.";
+
+/* Translation and appearance settings */
+"Перевод" = "Translation";
+"Язык перевода" = "Target language";
+"На русский, с русского — на английский" = "Into Russian, or English if the source is Russian";
+"Переводить сразу после выделения" = "Automatically translate selected text";
+"Показывать перевод после короткой паузы, сохраняя фокус в исходном приложении" = "Show the translation after a short delay and keep the original app in focus";
+"Задержка после выделения" = "Delay after selection";
+"Подсвечивать оригинал" = "Highlight matching source text";
+"Щёлкните по слову или выделите фразу в переводе, чтобы увидеть соответствующие слова оригинала" = "Click a word or select a phrase in the translation to highlight the matching source text";
+"Включи подсказки из словаря" = "Look up words in Dictionary";
+"Щёлкните по слову в оригинале, чтобы открыть системный словарь" = "Click a word in the source text to open the system dictionary";
+"Оформление" = "Appearance";
+"Тема" = "Theme";
+"Системная" = "System";
+"Светлая" = "Light";
+"Тёмная" = "Dark";
+
+/* Keyboard shortcuts and accessibility */
+"Управление" = "Controls";
+"Перевод текста" = "Translate text";
+"Быстрый перевод изображения" = "Translate a screen area";
+"Самостоятельный режим Caps Lock включён" = "Caps Lock shortcuts are enabled";
+"Для каждой команды можно назначить своё сочетание с ⌃, ⌥ или ⌘." = "Assign a shortcut with ⌃, ⌥, or ⌘ to each command.";
+"Универсальный доступ" = "Accessibility";
+"Разрешён" = "Allowed";
+"Разрешить…" = "Allow…";
+"Доступ нужен для чтения выделения и сочетаний с Caps Lock. Ввести текст вручную можно и без него." = "Allow access to read selected text and use Caps Lock shortcuts. You can always type or paste text manually.";
+"Нажмите сочетание…" = "Press a shortcut…";
+"Отмена" = "Cancel";
+"Назначить…" = "Assign…";
+"С Caps Lock…" = "With Caps Lock…";
+"Отменить запись: %@" = "Cancel recording for %@";
+"Горячая клавиша: %@" = "Keyboard shortcut for %@";
+"С Caps Lock: %@" = "Caps Lock shortcut for %@";
+"Одиночное нажатие ⇪ сохраняет системное действие. Для сочетаний временно используется F20." = "Pressing ⇪ on its own keeps its usual action. Shortcuts temporarily use F20.";
+"Убрать сочетание для перевода изображения" = "Remove the screen area shortcut";
+"Убрать сочетание" = "Remove shortcut";
+"Нажмите букву или цифру для сочетания с ⇪. Esc — отмена." = "Press a letter or number to use with ⇪. Press Esc to cancel.";
+"Удерживайте ⇪, ⌃, ⌥ или ⌘ и нажмите клавишу. Esc — отмена." = "Hold ⇪, ⌃, ⌥, or ⌘ and press a key. Press Esc to cancel.";
+"Удерживайте ⌃, ⌥ или ⌘ и нажмите клавишу. Esc — отмена." = "Hold ⌃, ⌥, or ⌘ and press a key. Press Esc to cancel.";
+"Клавиша %lld" = "Key %lld";
+"Это сочетание уже назначено другой команде переводчика." = "Another translator command already uses this shortcut.";
+"Не удалось зарегистрировать сочетание. Выберите другое." = "Couldn’t register this shortcut. Choose another one.";
+"Включите «Универсальный доступ» для myHomeTranslater." = "Allow Accessibility access for myHomeTranslater.";
+"Caps Lock или F20 уже переназначена. Освободите клавишу в Raycast или настройках клавиатуры." = "Caps Lock or F20 is already assigned. Remove the assignment in Raycast or Keyboard settings.";
+"macOS не предоставила клавиатуру для режима Caps Lock." = "macOS couldn’t find a keyboard for Caps Lock shortcuts.";
+"macOS не применила назначение Caps Lock. Проверьте универсальный доступ." = "macOS couldn’t assign Caps Lock. Check Accessibility permissions.";
+"Не удалось вернуть назначение Caps Lock. Переводчик повторит попытку." = "Couldn’t restore the Caps Lock assignment. The translator will try again.";
+
+/* Translation panel */
+"Текст для перевода" = "Text to translate";
+"Перетащить окно перевода" = "Drag the translation window";
+"Масштаб окна" = "Window zoom";
+"Изменить масштаб окна" = "Change window zoom";
+"Перевести текст с области экрана" = "Translate text from a screen area";
+"Открепить окно" = "Unpin window";
+"Закрепить поверх окон" = "Pin above other windows";
+"Открыть настройки" = "Open settings";
+"Закрыть (Esc)" = "Close (Esc)";
+"Чтобы закрыть окно, снимите закрепление" = "Unpin the window to close it";
+"Распознаём текст…" = "Recognizing text…";
+"Скопировано" = "Copied";
+"Переводить выделенное" = "Translate selections";
+"Закрепить окно и сразу переводить новые выделения в нём" = "Pin this window and translate each new selection in it";
+"Оригинал" = "Source";
+"Определять автоматически" = "Detect automatically";
+"Уточнить язык" = "Choose language";
+"Изменить язык оригинала" = "Change source language";
+"Введите или вставьте текст" = "Type or paste text";
+"Переводим…" = "Translating…";
+"Оригинал уже на выбранном языке." = "The source text is already in the target language.";
+"Для этой пары нужно скачать языки." = "Download the languages for this pair to translate.";
+"Загрузить и перевести" = "Download and translate";
+"Выберите язык оригинала в меню выше." = "Choose the source language from the menu above.";
+"Повторить" = "Try again";
+"Apple Translation не поддерживает эту пару языков. Проверьте язык оригинала." = "Apple Translation doesn’t support this language pair. Check the source language.";
+"Перевод не завершён. Проверьте загрузку языков или попробуйте ещё раз." = "Translation didn’t finish. Check your language downloads or try again.";
+
+/* Screen capture and text recognition */
+"Открыть настройки записи экрана" = "Open Screen Recording settings";
+"Разрешите переводчику запись экрана, чтобы сделать снимок области." = "Allow Screen Recording for the translator to capture a screen area.";
+"Не удалось сделать снимок. Попробуйте выделить область ещё раз." = "Couldn’t take a screenshot. Try selecting the area again.";
+"Не удалось распознать изображение. Попробуйте сделать снимок ещё раз." = "Couldn’t recognize text in the image. Try taking another screenshot.";
+"В этой области не найден текст. Выделите область с надписью." = "No text was found. Select an area that contains text.";

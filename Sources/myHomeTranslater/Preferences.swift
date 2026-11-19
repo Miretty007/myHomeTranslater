@@ -4,18 +4,26 @@ import NaturalLanguage
 import Observation
 import Translation
 
+extension Locale {
+    static let interfaceLanguage = Locale(identifier: Bundle.main.preferredLocalizations.first ?? "ru")
+}
+
 enum PanelZoom: Int, CaseIterable {
     case small = 75, standard = 100, large = 125, larger = 150, extraLarge = 175, double = 200
 
     var factor: CGFloat { CGFloat(rawValue) / 100 }
-    var label: String { "\(rawValue) %" }
+    var label: String { (Double(rawValue) / 100).formatted(.percent.locale(.interfaceLanguage)) }
 }
 
 enum ThemeChoice: String, CaseIterable {
     case system, light, dark
 
     var title: String {
-        switch self { case .system: "Системная"; case .light: "Светлая"; case .dark: "Тёмная" }
+        switch self {
+        case .system: String(localized: "Системная")
+        case .light: String(localized: "Светлая")
+        case .dark: String(localized: "Тёмная")
+        }
     }
 
     var appearance: NSAppearance? {
@@ -40,7 +48,7 @@ struct Shortcut: Codable, Hashable {
     var title: String {
         let symbols = [(alphaLock, "⇪"), (controlKey, "⌃"), (optionKey, "⌥"), (shiftKey, "⇧"), (cmdKey, "⌘")]
         return symbols.filter { modifiers & UInt32($0.0) != 0 }.map(\.1).joined()
-            + (Self.keyLabels[Int(keyCode)] ?? "Key \(keyCode)")
+            + (Self.keyLabels[Int(keyCode)] ?? String(localized: "Клавиша \(Int(keyCode))"))
     }
 }
 
@@ -49,8 +57,8 @@ struct LanguageOption: Identifiable, Equatable {
     var name: String { Self.name(for: id) }
 
     static func name(for id: String) -> String {
-        let russian = Locale(identifier: "ru")
-        return (russian.localizedString(forIdentifier: id) ?? id).capitalized(with: russian)
+        let locale = Locale.interfaceLanguage
+        return (locale.localizedString(forIdentifier: id) ?? id).capitalized(with: locale)
     }
 }
 

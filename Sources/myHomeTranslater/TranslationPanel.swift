@@ -39,7 +39,7 @@ final class TranslationRequest {
             guard !Task.isCancelled, !cancelled else { return }
             switch status {
             case .unsupported:
-                phase = .failed("Apple Translation не поддерживает эту пару языков. Проверьте язык оригинала.")
+                phase = .failed(String(localized: "Apple Translation не поддерживает эту пару языков. Проверьте язык оригинала."))
                 return
             case .supported where passive:
                 phase = .needsDownload
@@ -64,7 +64,7 @@ final class TranslationRequest {
         } catch {
             await MainActor.run {
                 guard !Task.isCancelled, !cancelled else { return }
-                phase = .failed("Перевод не завершён. Проверьте загрузку языков или попробуйте ещё раз.")
+                phase = .failed(String(localized: "Перевод не завершён. Проверьте загрузку языков или попробуйте ещё раз."))
             }
         }
     }
@@ -297,7 +297,7 @@ private struct ManualTextEditor: NSViewRepresentable {
         editor.maxSize = NSSize(width: CGFloat.greatestFiniteMagnitude, height: CGFloat.greatestFiniteMagnitude)
         editor.textContainer?.widthTracksTextView = true
         editor.textContainer?.containerSize.height = CGFloat.greatestFiniteMagnitude
-        editor.setAccessibilityLabel("Текст для перевода")
+        editor.setAccessibilityLabel(String(localized: "Текст для перевода"))
         editor.delegate = editor
         scroll.documentView = editor
         return scroll
@@ -472,7 +472,7 @@ struct PanelView: View {
         }
     }
 
-    private func iconButton(_ symbol: String, _ label: String, _ action: @escaping () -> Void) -> some View {
+    private func iconButton(_ symbol: String, _ label: LocalizedStringKey, _ action: @escaping () -> Void) -> some View {
         Button(action: action) {
             Image(systemName: symbol).frame(width: 20, height: 24)
         }.buttonStyle(.plain).help(label).accessibilityLabel(label)
@@ -499,7 +499,7 @@ struct PanelView: View {
             Divider()
             ForEach(preferences.languages) { item in Button(item.name) { select(item.id) } }
         } label: {
-            Text(language.map(LanguageOption.name) ?? "Уточнить язык").font(.caption)
+            Text(language.map(LanguageOption.name) ?? String(localized: "Уточнить язык")).font(.caption)
         }.fixedSize().menuStyle(.borderlessButton).help("Изменить язык оригинала")
     }
 

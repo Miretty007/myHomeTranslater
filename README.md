@@ -4,7 +4,7 @@ myHomeTranslater — переводчик для **macOS 15 и новее**, к�
 
 Перевод выполняет **Apple Translation** на Mac. При первом использовании языковой пары macOS предложит загрузить нужные пакеты. После загрузки этой парой можно пользоваться офлайн. По умолчанию русский текст переводится на английский, а текст на других поддерживаемых языках — на русский.
 
-**[Скачать myHomeTranslater 1.3.0 для macOS (ZIP)](https://github.com/Miretty007/myHomeTranslater/releases/download/v1.3.0/myHomeTranslater-1.3.0-macOS.zip)** · [Страница релиза](https://github.com/Miretty007/myHomeTranslater/releases/tag/v1.3.0)
+**[Скачать myHomeTranslater 1.4.0 для macOS (ZIP)](https://github.com/Miretty007/myHomeTranslater/releases/download/v1.4.0/myHomeTranslater-1.4.0-macOS.zip)** · [Страница релиза](https://github.com/Miretty007/myHomeTranslater/releases/tag/v1.4.0)
 
 <img src="docs/screenshots/word-selection-light.png" width="460" alt="Перевод английской фразы на русский. Щелчок по слову «молоко» подсветил milk в оригинале.">
 
@@ -15,6 +15,10 @@ myHomeTranslater — переводчик для **macOS 15 и новее**, к�
 1. Скачайте ZIP по ссылке выше и откройте его в Finder. В архиве лежит готовое приложение для Mac с Apple Silicon и Intel. Требуется macOS 15 или новее.
 2. Перетащите `myHomeTranslater.app` в папку «Программы» и откройте двойным щелчком.
 3. При первом запуске откроются настройки. Позже их можно открыть через значок переводчика в строке меню или шестерёнку в окне перевода.
+
+Интерфейс доступен на русском и английском. macOS выбирает язык по вашим предпочтениям. Чтобы выбрать его только для переводчика, откройте **Системные настройки → Основные → Язык и регион → Приложения**, добавьте myHomeTranslater, выберите язык и перезапустите приложение. Язык результата задаётся отдельно в настройках переводчика.
+
+**English interface.** To use English for myHomeTranslater, open **System Settings → General → Language & Region → Applications**, add myHomeTranslater, choose **English**, and relaunch the app.
 
 Сборка имеет локальную подпись и распространяется без нотарификации Apple. Если macOS сообщит, что не может проверить разработчика, и вы доверяете скачанной копии, закройте предупреждение. Затем откройте **Системные настройки → Конфиденциальность и безопасность** и подтвердите открытие именно myHomeTranslater в разделе «Безопасность». [Инструкция Apple](https://support.apple.com/ru-ru/102445)
 
@@ -98,5 +102,7 @@ open dist/myHomeTranslater.app
 swift test
 tools/verify-ui.sh
 ```
+
+Для проверки конкретного языка задайте `MHT_VERIFY_LANGUAGE=en` или `MHT_VERIFY_LANGUAGE=ru` при запуске `tools/verify-ui.sh`.
 
 Вторая команда открывает отдельную проверочную копию приложения и сохраняет снимки её окон. Для проверки распознавания на тестовом изображении запустите `MHT_VERIFY_SCREENSHOT=1 tools/verify-ui.sh`. Для интеграционного теста выделения в обоих направлениях используйте `MHT_TEST_BROWSER_SELECTION=1 swift test`. Этот тест открывает локальную страницу во временном профиле Google Chrome и требует «Универсального доступа» для процесса, который запускает тесты.

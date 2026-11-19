@@ -56,12 +56,12 @@ final class AppController: NSObject, NSApplicationDelegate, NSMenuDelegate {
         appItem.submenu = commands
         let editItem = NSMenuItem()
         appMenu.addItem(editItem)
-        let edit = NSMenu(title: "Правка")
-        for (label, selector, key) in [("Отменить", Selector(("undo:")), "z"),
-                                        ("Вырезать", #selector(NSText.cut(_:)), "x"),
-                                        ("Скопировать", #selector(NSText.copy(_:)), "c"),
-                                        ("Вставить", #selector(NSText.paste(_:)), "v"),
-                                        ("Выделить всё", #selector(NSText.selectAll(_:)), "a")] {
+        let edit = NSMenu(title: String(localized: "Правка"))
+        for (label, selector, key) in [(String(localized: "Отменить"), Selector(("undo:")), "z"),
+                                        (String(localized: "Вырезать"), #selector(NSText.cut(_:)), "x"),
+                                        (String(localized: "Скопировать"), #selector(NSText.copy(_:)), "c"),
+                                        (String(localized: "Вставить"), #selector(NSText.paste(_:)), "v"),
+                                        (String(localized: "Выделить всё"), #selector(NSText.selectAll(_:)), "a")] {
             edit.addItem(withTitle: label, action: selector, keyEquivalent: key)
         }
         editItem.submenu = edit
@@ -142,8 +142,8 @@ final class AppController: NSObject, NSApplicationDelegate, NSMenuDelegate {
         menu.addItem(makeItem("Завершить myHomeTranslater", #selector(quit), key: "q"))
     }
 
-    private func makeItem(_ title: String, _ action: Selector, key: String = "") -> NSMenuItem {
-        let item = NSMenuItem(title: title, action: action, keyEquivalent: key)
+    private func makeItem(_ title: String.LocalizationValue, _ action: Selector, key: String = "") -> NSMenuItem {
+        let item = NSMenuItem(title: String(localized: title), action: action, keyEquivalent: key)
         item.target = self
         return item
     }
@@ -168,7 +168,7 @@ final class AppController: NSObject, NSApplicationDelegate, NSMenuDelegate {
                                     requestAccess: { [weak self] in self?.requestAccess() })
             let window = NSWindow(contentRect: NSRect(x: 0, y: 0, width: 540, height: 606),
                                   styleMask: [.titled, .closable, .miniaturizable], backing: .buffered, defer: false)
-            window.title = "Настройки myHomeTranslater"
+            window.title = String(localized: "Настройки myHomeTranslater")
             window.contentView = NSHostingView(rootView: view)
             window.isReleasedWhenClosed = false
             window.center()
@@ -216,7 +216,7 @@ final class AppController: NSObject, NSApplicationDelegate, NSMenuDelegate {
         guard let hotKey else { return }
         let other: ShortcutAction = action == .text ? .image : .text
         if let shortcut, shortcut == preferences.shortcut(for: other) {
-            preferences.shortcutProblems[action] = "Это сочетание уже назначено другой команде переводчика."
+            preferences.shortcutProblems[action] = String(localized: "Это сочетание уже назначено другой команде переводчика.")
             return
         }
         let problem = hotKey.set(shortcut, for: action)
@@ -232,7 +232,7 @@ final class AppController: NSObject, NSApplicationDelegate, NSMenuDelegate {
     @objc(translateSelection:userData:error:)
     func translateSelection(_ board: NSPasteboard, userData: String?, error: AutoreleasingUnsafeMutablePointer<NSString?>) {
         guard let raw = Passage.read(from: board) else {
-            error.pointee = "Выделите слово или фразу." as NSString
+            error.pointee = String(localized: "Выделите слово или фразу.") as NSString
             return
         }
         pending?.cancel()
@@ -453,7 +453,7 @@ final class AppController: NSObject, NSApplicationDelegate, NSMenuDelegate {
     private func makePanel() -> TranslationPanel {
         let window = TranslationPanel(contentRect: .zero, styleMask: [.borderless, .nonactivatingPanel, .resizable],
                                       backing: .buffered, defer: false)
-        window.title = "Перевод"
+        window.title = String(localized: "Перевод")
         window.isFloatingPanel = true
         window.level = .floating
         window.hidesOnDeactivate = false
@@ -595,6 +595,18 @@ extension AppController {
             try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
             preferences.panelZoom = .standard
             var report = ["Hotkey registered: \(hotKey?.isRegistered(.text) == true)", "Accessibility granted: \(AXIsProcessTrusted())"]
+            if let language = ProcessInfo.processInfo.environment["MHT_VERIFY_LANGUAGE"] {
+                let menu = NSMenu()
+                menuNeedsUpdate(menu)
+                let isEnglish = language == "en"
+                guard Bundle.main.preferredLocalizations.first == language,
+                      menu.items.first?.title == (isEnglish ? "Translate Text…" : "Перевести текст…"),
+                      LanguageOption.name(for: "ru") == (isEnglish ? "Russian" : "Русский"),
+                      ThemeChoice.dark.title == (isEnglish ? "Dark" : "Тёмная") else {
+                    throw CocoaError(.formatting, userInfo: [NSLocalizedDescriptionKey: "Incorrect interface language for \(language)"])
+                }
+                report.append("Interface language: \(language), menu, language names and theme labels verified")
+            }
             if let fixture = ProcessInfo.processInfo.environment["MHT_VERIFY_COLD_FIXTURE"] {
                 report.append(try await verifyFirstHotkey(with: URL(fileURLWithPath: fixture)))
             }

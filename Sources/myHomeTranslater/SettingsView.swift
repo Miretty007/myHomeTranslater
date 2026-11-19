@@ -21,7 +21,10 @@ struct SettingsView: View {
                     .help("Показывать перевод после короткой паузы, сохраняя фокус в исходном приложении")
                 LabeledContent("Задержка после выделения") {
                     let seconds = Double(preferences.delayMilliseconds) / 1000
-                    let value = seconds.formatted(.number.locale(Locale(identifier: "ru")).precision(.fractionLength(0...2))) + " с"
+                    let value = Measurement(value: seconds, unit: UnitDuration.seconds).formatted(
+                        .measurement(width: .narrow, usage: .asProvided, numberFormatStyle: .number.precision(.fractionLength(0...2)))
+                        .locale(.interfaceLanguage)
+                    )
                     Slider(value: Binding(get: { Double(preferences.delayMilliseconds) },
                                           set: { preferences.delayMilliseconds = Int($0.rounded()) }),
                            in: Double(Preferences.delayRange.lowerBound)...Double(Preferences.delayRange.upperBound),
@@ -38,8 +41,8 @@ struct SettingsView: View {
                     .help("Щёлкните по слову в оригинале, чтобы открыть системный словарь")
             }
             Section("Управление") {
-                shortcutRow("Перевод текста", action: .text)
-                shortcutRow("Быстрый перевод изображения", action: .image)
+                shortcutRow(String(localized: "Перевод текста"), action: .text)
+                shortcutRow(String(localized: "Быстрый перевод изображения"), action: .image)
                 Group {
                     if let helpText {
                         Text(helpText)
@@ -84,13 +87,13 @@ struct SettingsView: View {
             if recording {
                 Text("Нажмите сочетание…").foregroundStyle(.secondary)
                 Button("Отмена", action: stopRecording)
-                    .accessibilityLabel("Отменить запись: " + title)
+                    .accessibilityLabel("Отменить запись: \(title)")
             } else {
-                Button(key?.title ?? "Назначить…") { recordShortcut(for: action) }
-                    .accessibilityLabel("Горячая клавиша: " + title)
+                Button(key?.title ?? String(localized: "Назначить…")) { recordShortcut(for: action) }
+                    .accessibilityLabel("Горячая клавиша: \(title)")
                 Button("С Caps Lock…") { recordShortcut(for: action, withCaps: true) }
                     .disabled(!preferences.trusted)
-                    .accessibilityLabel("С Caps Lock: " + title)
+                    .accessibilityLabel("С Caps Lock: \(title)")
                     .help("Одиночное нажатие ⇪ сохраняет системное действие. Для сочетаний временно используется F20.")
                 if action == .image, key != nil {
                     Button {
@@ -117,11 +120,11 @@ struct SettingsView: View {
             stopRecording()
         }
         if withCaps {
-            helpText = "Нажмите букву или цифру для сочетания с ⇪. Esc — отмена."
+            helpText = String(localized: "Нажмите букву или цифру для сочетания с ⇪. Esc — отмена.")
         } else if capsReady {
-            helpText = "Удерживайте ⇪, ⌃, ⌥ или ⌘ и нажмите клавишу. Esc — отмена."
+            helpText = String(localized: "Удерживайте ⇪, ⌃, ⌥ или ⌘ и нажмите клавишу. Esc — отмена.")
         } else {
-            helpText = "Удерживайте ⌃, ⌥ или ⌘ и нажмите клавишу. Esc — отмена."
+            helpText = String(localized: "Удерживайте ⌃, ⌥ или ⌘ и нажмите клавишу. Esc — отмена.")
         }
         monitor = NSEvent.addLocalMonitorForEvents(matching: .keyDown) { event in
             if event.keyCode == 53 { stopRecording(); return nil }

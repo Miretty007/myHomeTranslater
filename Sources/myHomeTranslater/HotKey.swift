@@ -44,7 +44,7 @@ final class HotKey {
     /// Keep the previous binding until its replacement has been acquired.
     func set(_ shortcut: Shortcut?, for action: ShortcutAction) -> String? {
         if let shortcut, bindings.contains(where: { $0.key != action && $0.value == shortcut }) {
-            return "Это сочетание уже назначено другой команде переводчика."
+            return String(localized: "Это сочетание уже назначено другой команде переводчика.")
         }
         if bindings[action] == shortcut, shortcut == nil || isRegistered(action) { return nil }
         var updated = bindings
@@ -58,7 +58,7 @@ final class HotKey {
                 sequence &+= 1
                 guard handler != nil, RegisterEventHotKey(shortcut.keyCode, shortcut.modifiers,
                       EventHotKeyID(signature: Self.signature, id: sequence), GetApplicationEventTarget(), 0, &newRef) == noErr
-                else { return "Не удалось зарегистрировать сочетание. Выберите другое." }
+                else { return String(localized: "Не удалось зарегистрировать сочетание. Выберите другое.") }
             }
         }
         if capsShortcuts.isEmpty, !caps.stop() {

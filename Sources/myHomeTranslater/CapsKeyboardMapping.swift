@@ -7,11 +7,11 @@ enum CapsModeError: LocalizedError {
 
     var errorDescription: String? {
         switch self {
-        case .accessibility: "Включите «Универсальный доступ» для myHomeTranslater."
-        case .conflict: "Caps Lock или F20 уже переназначена. Освободите клавишу в Raycast или настройках клавиатуры."
-        case .noKeyboard: "macOS не предоставила клавиатуру для режима Caps Lock."
-        case .write: "macOS не применила назначение Caps Lock. Проверьте универсальный доступ."
-        case .restore: "Не удалось вернуть назначение Caps Lock. Переводчик повторит попытку."
+        case .accessibility: String(localized: "Включите «Универсальный доступ» для myHomeTranslater.")
+        case .conflict: String(localized: "Caps Lock или F20 уже переназначена. Освободите клавишу в Raycast или настройках клавиатуры.")
+        case .noKeyboard: String(localized: "macOS не предоставила клавиатуру для режима Caps Lock.")
+        case .write: String(localized: "macOS не применила назначение Caps Lock. Проверьте универсальный доступ.")
+        case .restore: String(localized: "Не удалось вернуть назначение Caps Lock. Переводчик повторит попытку.")
         }
     }
 }
