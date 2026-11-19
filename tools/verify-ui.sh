@@ -14,5 +14,9 @@ cp Info.plist "$app/"
 /usr/libexec/PlistBuddy -c 'Delete :NSServices' "$app/Info.plist"
 codesign --force --sign - --timestamp=none "${app:h}"
 output=${1:-/tmp/myHomeTranslater-previews}
+if [[ "${MHT_VERIFY_COLD:-0}" == 1 ]]; then
+  swiftc tools/fixtures/empty-field.swift -o "$work/empty-field"
+  export MHT_VERIFY_COLD_FIXTURE="$work/empty-field"
+fi
 MHT_VERIFY="$output" "$app/MacOS/myHomeTranslater"
 cat "$output/report.txt"

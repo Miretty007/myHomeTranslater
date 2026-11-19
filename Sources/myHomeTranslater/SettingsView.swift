@@ -3,7 +3,8 @@ import SwiftUI
 
 struct SettingsView: View {
     @Bindable var preferences: Preferences
-    let changeShortcut: (Shortcut) -> Void
+    let changeShortcut: (Shortcut?, ShortcutAction) -> Void
+    let recordCaps: (((Shortcut) -> Void)?) -> Bool
     let requestAccess: () -> Void
     @State private var monitor: Any?
     @State private var helpText: String?
@@ -31,23 +32,31 @@ struct SettingsView: View {
                     Text(verbatim: value).monospacedDigit().frame(width: 50, alignment: .trailing)
                 }
                 .disabled(!preferences.automatic)
+                Toggle("Подсвечивать оригинал", isOn: $preferences.highlightOriginal)
+                    .help("Щёлкните по слову или выделите фразу в переводе, чтобы увидеть соответствующие слова оригинала")
+                Toggle("Включи подсказки из словаря", isOn: $preferences.dictionaryHints)
+                    .help("Щёлкните по слову в оригинале, чтобы открыть системный словарь")
             }
             Section("Управление") {
-                LabeledContent("Горячая клавиша") {
-                    Button(preferences.recordingShortcut ? "Нажмите сочетание…" : preferences.shortcut.title) {
-                        if preferences.recordingShortcut { stopRecording() } else { recordShortcut() }
+                shortcutRow("Перевод текста", action: .text)
+                shortcutRow("Быстрый перевод изображения", action: .image)
+                Group {
+                    if let helpText {
+                        Text(helpText)
+                    } else if (preferences.shortcut.usesCapsLock || preferences.imageShortcut?.usesCapsLock == true),
+                              preferences.shortcutProblems.isEmpty {
+                        Label("Самостоятельный режим Caps Lock включён", systemImage: "keyboard")
+                    } else {
+                        Text("Для каждой команды можно назначить своё сочетание с ⌃, ⌥ или ⌘.")
                     }
-                    .accessibilityLabel("Изменить горячую клавишу")
                 }
-                if let message = helpText ?? preferences.shortcutProblem {
-                    Text(message).font(.callout).foregroundStyle(.secondary)
-                }
+                .font(.callout).foregroundStyle(.secondary)
                 LabeledContent("Универсальный доступ") {
                     if preferences.trusted {
                         Label("Разрешён", systemImage: "checkmark.circle").foregroundStyle(.secondary)
                     } else { Button("Разрешить…", action: requestAccess) }
                 }
-                Text("Доступ нужен для горячей клавиши и автоперевода. По правому клику выберите «Службы → Перевести в myHomeTranslater».")
+                Text("Доступ нужен для чтения выделения и сочетаний с Caps Lock. Ввести текст вручную можно и без него.")
                     .font(.callout).foregroundStyle(.secondary).fixedSize(horizontal: false, vertical: true)
             }
             Section("Оформление") {
@@ -58,27 +67,75 @@ struct SettingsView: View {
         }
         .formStyle(.grouped)
         .onDisappear { stopRecording() }
-        .onReceive(NotificationCenter.default.publisher(for: NSWindow.didResignKeyNotification)) { _ in
+        .onReceive(NotificationCenter.default.publisher(for: NSWindow.didResignKeyNotification)) { note in
+            if preferences.recordingShortcut, (note.object as? NSWindow)?.isVisible == true { stopRecording() }
+        }
+        .onReceive(NotificationCenter.default.publisher(for: NSWindow.willCloseNotification)) { _ in
             if preferences.recordingShortcut { stopRecording() }
         }
     }
 
-    private func recordShortcut() {
+    @ViewBuilder private func shortcutRow(_ title: String, action: ShortcutAction) -> some View {
+        let recording = preferences.recordingAction == action
+        let key = preferences.shortcut(for: action)
+        HStack {
+            Text(title)
+            Spacer(minLength: 8)
+            if recording {
+                Text("Нажмите сочетание…").foregroundStyle(.secondary)
+                Button("Отмена", action: stopRecording)
+                    .accessibilityLabel("Отменить запись: " + title)
+            } else {
+                Button(key?.title ?? "Назначить…") { recordShortcut(for: action) }
+                    .accessibilityLabel("Горячая клавиша: " + title)
+                Button("С Caps Lock…") { recordShortcut(for: action, withCaps: true) }
+                    .disabled(!preferences.trusted)
+                    .accessibilityLabel("С Caps Lock: " + title)
+                    .help("Одиночное нажатие ⇪ сохраняет системное действие. Для сочетаний временно используется F20.")
+                if action == .image, key != nil {
+                    Button {
+                        stopRecording()
+                        changeShortcut(nil, .image)
+                    } label: { Image(systemName: "xmark") }
+                    .accessibilityLabel("Убрать сочетание для перевода изображения")
+                    .help("Убрать сочетание")
+                }
+            }
+        }
+        if let message = preferences.shortcutProblems[action] {
+            Text(message).font(.callout).foregroundStyle(.secondary)
+        }
+    }
+
+    private func recordShortcut(for action: ShortcutAction, withCaps: Bool = false) {
         stopRecording()
-        preferences.recordingShortcut = true
-        helpText = "Нажмите букву или цифру с ⌃, ⌥ или ⌘. Esc отменяет запись."
+        preferences.recordingAction = action
+        let capsReady = recordCaps { shortcut in
+            guard preferences.recordingAction == action else { return }
+            // Install the captured shortcut before releasing the temporary listener.
+            changeShortcut(shortcut, action)
+            stopRecording()
+        }
+        if withCaps {
+            helpText = "Нажмите букву или цифру для сочетания с ⇪. Esc — отмена."
+        } else if capsReady {
+            helpText = "Удерживайте ⇪, ⌃, ⌥ или ⌘ и нажмите клавишу. Esc — отмена."
+        } else {
+            helpText = "Удерживайте ⌃, ⌥ или ⌘ и нажмите клавишу. Esc — отмена."
+        }
         monitor = NSEvent.addLocalMonitorForEvents(matching: .keyDown) { event in
             if event.keyCode == 53 { stopRecording(); return nil }
-            guard let shortcut = Shortcut(event: event) else { return nil }
+            guard let shortcut = Shortcut(keyCode: event.keyCode, flags: event.modifierFlags, capsHeld: withCaps) else { return nil }
             stopRecording()
-            changeShortcut(shortcut)
+            changeShortcut(shortcut, action)
             return nil
         }
     }
 
     private func stopRecording() {
         if let monitor { NSEvent.removeMonitor(monitor); self.monitor = nil }
-        preferences.recordingShortcut = false
+        preferences.recordingAction = nil
         helpText = nil
+        _ = recordCaps(nil)
     }
 }

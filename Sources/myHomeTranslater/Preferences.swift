@@ -27,15 +27,20 @@ enum ThemeChoice: String, CaseIterable {
     }
 }
 
-struct Shortcut: Codable, Equatable {
+enum ShortcutAction: CaseIterable {
+    case text, image
+}
+
+struct Shortcut: Codable, Hashable {
     var keyCode: UInt32
     var modifiers: UInt32
-    var key: String
-    static let standard = Shortcut(keyCode: UInt32(kVK_ANSI_T), modifiers: UInt32(controlKey | optionKey), key: "T")
+    static let standard = Shortcut(keyCode: UInt32(kVK_ANSI_T), modifiers: UInt32(controlKey | optionKey))
+    var usesCapsLock: Bool { modifiers & UInt32(alphaLock) != 0 }
 
     var title: String {
-        [(controlKey, "⌃"), (optionKey, "⌥"), (shiftKey, "⇧"), (cmdKey, "⌘")]
-            .filter { modifiers & UInt32($0.0) != 0 }.map(\.1).joined() + key
+        let symbols = [(alphaLock, "⇪"), (controlKey, "⌃"), (optionKey, "⌥"), (shiftKey, "⇧"), (cmdKey, "⌘")]
+        return symbols.filter { modifiers & UInt32($0.0) != 0 }.map(\.1).joined()
+            + (Self.keyLabels[Int(keyCode)] ?? "Key \(keyCode)")
     }
 }
 
@@ -54,10 +59,32 @@ struct Direction: Equatable {
     var target: String
 
     static func choose(text: String, sourceOverride: String?, fixedTarget: String) -> Self {
-        let guess = sourceOverride ?? NLLanguageRecognizer.dominantLanguage(for: text)?.rawValue
+        let guess = sourceOverride ?? detectedLanguage(in: text, preferRussian: fixedTarget == "auto")?.rawValue
         let source = guess == NLLanguage.undetermined.rawValue ? nil : guess
         let target = fixedTarget == "auto" ? (base(source) == "ru" ? "en" : "ru") : fixedTarget
         return Self(source: source, target: target)
+    }
+
+    private static func detectedLanguage(in text: String, preferRussian: Bool) -> NLLanguage? {
+        let recognizer = NLLanguageRecognizer()
+        recognizer.processString(text)
+        guard let language = recognizer.dominantLanguage else { return nil }
+        guard preferRussian, language != .russian, text.utf8.count <= 256,
+              Locale.Language(identifier: language.rawValue).script?.identifier == "Cyrl" else { return language }
+
+        let words = text.split(whereSeparator: { !$0.isLetter })
+        guard words.count <= 8 else { return language }
+        let scores = recognizer.languageHypotheses(withMaximum: 2)
+        if let russian = scores[.russian], let winner = scores[language], russian >= 0.8 * winner {
+            return .russian
+        }
+
+        // The whole heading can score strongly for Bulgarian even when every word
+        // scores highest for Russian. Short words like Ukrainian “це” still count.
+        guard words.count >= 2, words.allSatisfy({
+            NLLanguageRecognizer.dominantLanguage(for: String($0)) == .russian
+        }) else { return language }
+        return .russian
     }
 
     static func base(_ id: String?) -> String? {
@@ -90,11 +117,24 @@ final class Preferences {
     var target: String { didSet { defaults.set(target, forKey: "target") } }
     var theme: ThemeChoice { didSet { defaults.set(theme.rawValue, forKey: "theme"); NSApp.appearance = theme.appearance } }
     var automatic: Bool { didSet { defaults.set(automatic, forKey: "automatic"); onAutomaticChange?() } }
+    var highlightOriginal: Bool { didSet { defaults.set(highlightOriginal, forKey: "highlightOriginal") } }
+    var dictionaryHints: Bool { didSet { defaults.set(dictionaryHints, forKey: "dictionaryHints") } }
     var shortcut: Shortcut { didSet { defaults.set(try? JSONEncoder().encode(shortcut), forKey: "shortcut") } }
+    var imageShortcut: Shortcut? {
+        didSet {
+            if let imageShortcut { defaults.set(try? JSONEncoder().encode(imageShortcut), forKey: "imageShortcut") }
+            else { defaults.removeObject(forKey: "imageShortcut") }
+        }
+    }
     var languages = [LanguageOption(id: "en"), LanguageOption(id: "ru")]
     var trusted = AXIsProcessTrusted()
-    var shortcutProblem: String?
-    var recordingShortcut = false
+    var shortcutProblems: [ShortcutAction: String] = [:]
+    var recordingAction: ShortcutAction?
+    var recordingShortcut: Bool { recordingAction != nil }
+
+    func shortcut(for action: ShortcutAction) -> Shortcut? {
+        action == .text ? shortcut : imageShortcut
+    }
     @ObservationIgnored var onAutomaticChange: (() -> Void)?
 
     init(defaults: UserDefaults = .standard) {
@@ -105,7 +145,10 @@ final class Preferences {
         target = defaults.string(forKey: "target") ?? "auto"
         theme = ThemeChoice(rawValue: defaults.string(forKey: "theme") ?? "") ?? .system
         automatic = defaults.bool(forKey: "automatic")
+        highlightOriginal = defaults.bool(forKey: "highlightOriginal")
+        dictionaryHints = defaults.bool(forKey: "dictionaryHints")
         shortcut = defaults.data(forKey: "shortcut").flatMap { try? JSONDecoder().decode(Shortcut.self, from: $0) } ?? .standard
+        imageShortcut = defaults.data(forKey: "imageShortcut").flatMap { try? JSONDecoder().decode(Shortcut.self, from: $0) }
         if target != "auto", !languages.contains(where: { $0.id == target }) { languages.append(.init(id: target)) }
     }
 

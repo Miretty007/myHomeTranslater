@@ -3,26 +3,34 @@ import SwiftUI
 import Translation
 
 enum TranslationPhase: Equatable {
-    case loading, ready(String), sameLanguage, needsDownload, chooseSource, failed(String)
+    case loading, ready(AttributedString), sameLanguage, needsDownload, chooseSource, failed(String)
 }
 
 @MainActor @Observable
 final class TranslationRequest {
-    let text: String
+    let text: AttributedString
     let passive: Bool
     let direction: Direction
     var phase: TranslationPhase = .loading
     var configuration: TranslationSession.Configuration?
     var actualSource: String?
+    private(set) var highlightedWords: [NSRange] = []
+    struct Lookup: Identifiable {
+        let id = UUID()
+        let sourceLanguage: String
+        let fragments: [WordAlignment.Fragment]
+    }
+    private(set) var lookup: Lookup?
     private(set) var cancelled = false
 
-    init(_ text: String, source: String?, target: String, passive: Bool) {
+    init(_ text: AttributedString, source: String?, target: String, passive: Bool) {
         self.text = text
         self.passive = passive
-        self.direction = Direction.choose(text: text, sourceOverride: source, fixedTarget: target)
+        self.direction = Direction.choose(text: String(text.characters), sourceOverride: source, fixedTarget: target)
     }
 
     func prepare() async {
+        guard !cancelled, !Task.isCancelled, phase == .loading else { return }
         if direction.isSameLanguage { phase = .sameLanguage; return }
         let target = Locale.Language(identifier: direction.target)
         let source = direction.source.map(Locale.Language.init(identifier:))
@@ -45,11 +53,9 @@ final class TranslationRequest {
         configuration = .init(source: source, target: target)
     }
 
-    nonisolated func translate(using session: TranslationSession) async {
+    nonisolated func translate(using session: TranslationSession, alignWords: Bool = false) async {
         do {
-            let result = try await session.translate(text)
-            let language = result.sourceLanguage.minimalIdentifier
-            let translated = result.targetText
+            let (translated, language) = try await PassageTranslation.translate(text, using: session, alignWords: alignWords)
             await MainActor.run {
                 guard !Task.isCancelled, !cancelled else { return }
                 actualSource = language
@@ -63,18 +69,104 @@ final class TranslationRequest {
         }
     }
 
-    func cancel() { cancelled = true; configuration = nil }
+    func selectTranslation(_ selection: NSRange?) {
+        lookup = nil
+        highlightedWords = []
+        guard !cancelled, let selection, case .ready(let target) = phase else { return }
+        let original = String(text.characters) as NSString
+        highlightedWords = WordAlignment.originalRanges(for: selection, in: target, original: original)
+        guard highlightedWords.isEmpty, let source = actualSource ?? direction.source else { return }
+        let fragments = WordAlignment.fragments(for: selection, in: String(target.characters) as NSString, original: original)
+        if !fragments.isEmpty { lookup = Lookup(sourceLanguage: source, fragments: fragments) }
+    }
+
+    nonisolated func resolve(_ pending: Lookup, using session: TranslationSession) async {
+        let from = Locale.Language(identifier: direction.target)
+        let to = Locale.Language(identifier: pending.sourceLanguage)
+        guard await TranslationLanguages.status(from: from, to: to) == .installed else { return }
+        let original = String(text.characters) as NSString
+        var ranges: [NSRange] = []
+        for fragment in pending.fragments {
+            guard await lookup?.id == pending.id, !Task.isCancelled,
+                  let response = try? await session.translate(fragment.selectedText) else { return }
+            if let range = WordAlignment.uniqueMatch(response.targetText, in: original, paragraph: fragment.originalParagraph) {
+                ranges.append(range)
+            }
+        }
+        await MainActor.run {
+            guard lookup?.id == pending.id, !Task.isCancelled else { return }
+            highlightedWords = ranges
+        }
+    }
+
+    func cancel() { cancelled = true; configuration = nil; selectTranslation(nil) }
 }
 
 enum PanelContent {
     case request(TranslationRequest)
-    case notice(String, String, Bool)
+    case manual(ManualTranslation)
+    case screenshot(ManualTranslation)
+
+    @MainActor var preferredWidth: CGFloat {
+        let compactWidth: CGFloat = 384
+        func width(for text: some Collection<Character>) -> CGFloat {
+            let threshold = 200
+            return text.prefix(threshold).count == threshold ? compactWidth * 2 : compactWidth
+        }
+        switch self {
+        case .request(let request): return width(for: request.text.characters)
+        case .screenshot(let editor): return width(for: editor.text)
+        case .manual: return compactWidth
+        }
+    }
+}
+
+@MainActor @Observable
+final class ManualTranslation {
+    private(set) var text = ""
+    private(set) var source: String?
+    private(set) var request: TranslationRequest?
+    @ObservationIgnored private var pending: Task<Void, Never>?
+
+    init(text: String = "") { self.text = text }
+
+    func edit(_ text: String, target: String) {
+        cancel()
+        self.text = text
+        guard !text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else { return }
+        let deadline = ContinuousClock.now + .milliseconds(400)
+        pending = Task { [weak self] in
+            do { try await Task.sleep(until: deadline, clock: .continuous) } catch { return }
+            guard !Task.isCancelled else { return }
+            guard let self else { return }
+            request = TranslationRequest(AttributedString(text), source: source, target: target, passive: false)
+        }
+    }
+
+    func translate(source: String?, target: String) {
+        cancel()
+        self.source = source
+        guard !text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else { return }
+        request = TranslationRequest(AttributedString(text), source: source, target: target, passive: false)
+    }
+
+    func cancel() {
+        pending?.cancel()
+        pending = nil
+        request?.cancel()
+        request = nil
+    }
 }
 
 @MainActor @Observable
 final class PanelState {
     static let minimumReadingSize = CGSize(width: 360, height: 260)
-    var isPinned = false
+    var manuallyPinned = false
+    var translatesSelection = false
+    var isPinned: Bool { manuallyPinned || translatesSelection }
+    var canClose: Bool { !manuallyPinned || translatesSelection }
+    var screenshotProblem: ScreenshotProblem?
+    var recognizingScreenshot = false
     var availableSize: CGSize = .zero
     // Store the user's reading area in unzoomed points so zoom stays independent.
     var readingSize: CGSize?
@@ -99,12 +191,13 @@ final class PanelState {
 // Measure in logical points, then reserve the scaled bounds in the window.
 private struct ZoomedPanelLayout: Layout {
     let scale: CGFloat
+    let preferredWidth: CGFloat
     let available: CGSize
     let readingFrame: CGSize?
 
     func sizeThatFits(proposal: ProposedViewSize, subviews: Subviews, cache: inout ()) -> CGSize {
         if let readingFrame { return readingFrame }
-        let width = min(384 * scale, available.width)
+        let width = min(preferredWidth * scale, available.width)
         let content = subviews[0].sizeThatFits(.init(width: width / scale, height: nil))
         return CGSize(width: width, height: min(ceil(content.height * scale), available.height))
     }
@@ -125,22 +218,141 @@ private struct PanelDragArea: NSViewRepresentable {
     func updateNSView(_ view: DragView, context: Context) {}
 }
 
+private struct PassageTextView: NSViewRepresentable {
+    let text: AttributedString
+    let fontSize: CGFloat
+    let secondary: Bool
+    let dictionaryHints: Bool
+    let highlights: [NSRange]
+    let select: ((NSRange?) -> Void)?
+
+    func makeNSView(context: Context) -> WordTextView {
+        let view = WordTextView()
+        view.isEditable = false
+        view.isSelectable = true
+        view.drawsBackground = false
+        view.textContainerInset = .zero
+        view.textContainer?.lineFragmentPadding = 0
+        view.textContainer?.heightTracksTextView = false
+        view.isVerticallyResizable = false
+        return view
+    }
+
+    func updateNSView(_ view: WordTextView, context: Context) {
+        let rich = Passage.typeset(text, size: fontSize, color: secondary ? .secondaryLabelColor : .labelColor)
+        if view.textStorage?.isEqual(to: rich) == false { view.textStorage?.setAttributedString(rich) }
+        view.dictionaryHints = dictionaryHints
+        view.onTextSelection = select
+        view.highlight(highlights)
+    }
+
+    func sizeThatFits(_ proposal: ProposedViewSize, nsView: WordTextView, context: Context) -> CGSize? {
+        guard let width = proposal.width, width > 0, width.isFinite,
+              let container = nsView.textContainer, let layout = nsView.layoutManager else { return nil }
+        container.size = CGSize(width: width, height: CGFloat.greatestFiniteMagnitude)
+        layout.ensureLayout(for: container)
+        return CGSize(width: width, height: ceil(layout.usedRect(for: container).maxY))
+    }
+}
+
+/// A nonactivating panel must explicitly give its field first responder status
+/// after AppKit attaches the hosting view. Otherwise the first keystroke is lost.
+private struct ManualTextEditor: NSViewRepresentable {
+    let text: String
+    let dictionaryHints: Bool
+    let highlights: [NSRange]
+    let clearHighlight: (() -> Void)?
+    let edit: (String) -> Void
+
+    final class Editor: WordTextView, NSTextViewDelegate {
+        var edit: ((String) -> Void)?
+        override func viewDidMoveToWindow() {
+            super.viewDidMoveToWindow()
+            guard window != nil else { return }
+            DispatchQueue.main.async { [weak self] in
+                guard let self, let window, window.isVisible else { return }
+                window.makeFirstResponder(self)
+            }
+        }
+        func textDidChange(_ notification: Notification) { edit?(string) }
+        override func cancelOperation(_ sender: Any?) {
+            if hasMarkedText() { super.cancelOperation(sender) }
+            else { (window as? TranslationPanel)?.onEscape?() }
+        }
+    }
+
+    func makeNSView(context: Context) -> NSScrollView {
+        let scroll = NSScrollView()
+        scroll.hasVerticalScroller = true
+        scroll.autohidesScrollers = true
+        scroll.drawsBackground = false
+        let editor = Editor()
+        editor.isRichText = false
+        editor.allowsUndo = true
+        editor.drawsBackground = false
+        editor.font = .systemFont(ofSize: 14)
+        editor.autoresizingMask = [.width]
+        editor.isHorizontallyResizable = false
+        editor.isVerticallyResizable = true
+        editor.maxSize = NSSize(width: CGFloat.greatestFiniteMagnitude, height: CGFloat.greatestFiniteMagnitude)
+        editor.textContainer?.widthTracksTextView = true
+        editor.textContainer?.containerSize.height = CGFloat.greatestFiniteMagnitude
+        editor.setAccessibilityLabel("Текст для перевода")
+        editor.delegate = editor
+        scroll.documentView = editor
+        return scroll
+    }
+
+    func updateNSView(_ scroll: NSScrollView, context: Context) {
+        guard let editor = scroll.documentView as? Editor else { return }
+        editor.edit = edit
+        editor.dictionaryHints = dictionaryHints
+        editor.onTextSelection = clearHighlight.map { clear in { _ in clear() } }
+        if !editor.hasMarkedText(), editor.string != text { editor.string = text }
+        editor.highlight(highlights)
+    }
+}
+
 struct PanelView: View {
     let content: PanelContent
     let preferences: Preferences
     let state: PanelState
     let togglePin: () -> Void
+    let setTranslatesSelection: @MainActor (Bool) -> Void
     let close: () -> Void
     let settings: () -> Void
+    let takeScreenshot: () -> Void
     let repeatRequest: (String?) -> Void
     @State private var copied = false
 
+    private var currentRequest: TranslationRequest? {
+        switch content {
+        case .request(let request): request
+        case .manual(let manual), .screenshot(let manual): manual.request
+        }
+    }
+
     var body: some View {
         let scale = preferences.panelZoom.factor
-        ZoomedPanelLayout(scale: scale, available: state.availableSize, readingFrame: state.readingFrameSize(scale: scale)) {
+        ZoomedPanelLayout(scale: scale, preferredWidth: content.preferredWidth,
+                          available: state.availableSize, readingFrame: state.readingFrameSize(scale: scale)) {
             panelBody.scaleEffect(scale, anchor: .topLeading)
         }
         .fixedSize()
+        .background {
+            if preferences.highlightOriginal, let request = currentRequest, let lookup = request.lookup {
+                Color.clear
+                    .translationTask(.init(source: .init(identifier: request.direction.target),
+                                           target: .init(identifier: lookup.sourceLanguage))) { @Sendable session in
+                        await request.resolve(lookup, using: session)
+                    }
+                    .id(lookup.id)
+                    .allowsHitTesting(false)
+            }
+        }
+        .onChange(of: preferences.highlightOriginal) { _, enabled in
+            if !enabled { currentRequest?.selectTranslation(nil) }
+        }
     }
 
     private var panelBody: some View {
@@ -153,7 +365,7 @@ struct PanelView: View {
                 }
                 .frame(maxHeight: .infinity)
                 .overlay {
-                    if state.isPinned { PanelDragArea().help("Перетащить закреплённое окно") }
+                    PanelDragArea().help("Перетащить окно перевода")
                 }
                 Menu {
                     Picker("Масштаб окна", selection: Bindable(preferences).panelZoom) {
@@ -165,37 +377,57 @@ struct PanelView: View {
                 .menuStyle(.borderlessButton).fixedSize()
                 .help("Изменить масштаб окна").accessibilityLabel("Масштаб окна")
                 .accessibilityValue(preferences.panelZoom.label)
+                iconButton("camera", "Перевести текст с области экрана", takeScreenshot)
+                    .disabled(state.recognizingScreenshot)
                 iconButton(state.isPinned ? "pin.fill" : "pin",
                            state.isPinned ? "Открепить окно" : "Закрепить поверх окон", togglePin)
                     .foregroundStyle(state.isPinned ? AnyShapeStyle(.tint) : AnyShapeStyle(.secondary))
                 iconButton("gearshape", "Открыть настройки", settings)
                 iconButton("xmark", "Закрыть (Esc)", close)
-                    .disabled(state.isPinned)
-                    .help(state.isPinned ? "Чтобы закрыть окно, снимите закрепление" : "Закрыть (Esc)")
+                    .disabled(!state.canClose)
+                    .help(state.canClose ? "Закрыть (Esc)" : "Чтобы закрыть окно, снимите закрепление")
             }
             .padding(.horizontal, 16).frame(height: 40)
             Divider()
-            switch content {
-            case .request(let request):
-                VStack(spacing: 0) {
-                    if state.readingSize == nil {
-                        fittingContent { requestBody(request) }
-                    } else {
-                        requestBody(request)
-                            .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
+            if let problem = state.screenshotProblem {
+                VStack(alignment: .leading, spacing: 6) {
+                    Text(problem.message).font(.callout).fixedSize(horizontal: false, vertical: true)
+                    if case .permission = problem,
+                       let url = URL(string: "x-apple.systempreferences:com.apple.preference.security?Privacy_ScreenCapture") {
+                        Link("Открыть настройки записи экрана", destination: url)
                     }
-                }
-                    .task { await request.prepare() }
-                    .translationTask(request.configuration, action: request.translate(using:))
-            case .notice(let title, let message, let permission):
-                fittingContent {
-                    VStack(alignment: .leading, spacing: 12) {
-                        Text(title).font(.headline)
-                        Text(message).foregroundStyle(.secondary).fixedSize(horizontal: false, vertical: true)
-                        if permission { Button("Открыть настройки", action: settings) }
+                }.padding(12)
+                Divider()
+            }
+            ZStack(alignment: .topLeading) {
+                translationContent
+                    .opacity(state.recognizingScreenshot ? 0 : 1)
+                    .disabled(state.recognizingScreenshot)
+                    .accessibilityHidden(state.recognizingScreenshot)
+                if state.recognizingScreenshot {
+                    HStack(spacing: 8) {
+                        ProgressView().controlSize(.small)
+                        Text("Распознаём текст…").foregroundStyle(.secondary)
                     }.padding(16)
                 }
             }
+            .frame(maxHeight: state.readingSize == nil ? nil : .infinity, alignment: .topLeading)
+            HStack {
+                if case .ready(let result) = currentRequest?.phase {
+                    Button { copy(result) } label: {
+                        Label(copied ? "Скопировано" : "Скопировать", systemImage: copied ? "checkmark" : "doc.on.doc")
+                    }
+                }
+                Spacer(minLength: 8)
+                Toggle("Переводить выделенное", isOn: Binding(get: { state.translatesSelection }, set: setTranslatesSelection))
+                    .toggleStyle(.switch)
+                    .fixedSize()
+                    .help("Закрепить окно и сразу переводить новые выделения в нём")
+            }
+            .controlSize(.small)
+            .disabled(state.recognizingScreenshot)
+            .padding(.horizontal, 16)
+            .padding(.bottom, 12)
         }
         .frame(maxWidth: .infinity, maxHeight: state.readingSize == nil ? nil : .infinity, alignment: .topLeading)
         .background(Color(nsColor: .windowBackgroundColor))
@@ -211,6 +443,26 @@ struct PanelView: View {
             .allowsHitTesting(false).accessibilityHidden(true)
         }
         .accessibilityElement(children: .contain)
+    }
+
+    @ViewBuilder private var translationContent: some View {
+        switch content {
+        case .request(let request):
+            VStack(spacing: 0) {
+                if state.readingSize == nil {
+                    fittingContent { requestBody(request) }
+                } else {
+                    requestBody(request)
+                        .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
+                }
+            }
+                .task { await request.prepare() }
+                .translationTask(request.configuration) { @Sendable [alignWords = preferences.highlightOriginal] session in
+                    await request.translate(using: session, alignWords: alignWords)
+                }
+        case .manual(let manual), .screenshot(let manual):
+            manualBody(manual)
+        }
     }
 
     private func fittingContent<Content: View>(@ViewBuilder _ body: () -> Content) -> some View {
@@ -232,48 +484,89 @@ struct PanelView: View {
                 HStack(spacing: 8) {
                     Text("Оригинал").font(.caption.weight(.semibold)).foregroundStyle(.secondary)
                     Spacer()
-                    Menu {
-                        Button("Определять автоматически") { repeatRequest(nil) }
-                        Divider()
-                        ForEach(preferences.languages) { item in
-                            Button(item.name) { repeatRequest(item.id) }
-                        }
-                    } label: {
-                        Text((request.actualSource ?? request.direction.source).map(LanguageOption.name) ?? "Уточнить язык")
-                            .font(.caption)
-                    }.fixedSize().menuStyle(.borderlessButton)
-                    .help("Изменить язык оригинала")
+                    sourceMenu(request.actualSource ?? request.direction.source, select: repeatRequest)
                 }
-                passage(request.text, size: 14, limit: sourceHeightLimit, secondary: true)
+                passage(request.text, size: 14, limit: sourceHeightLimit, secondary: true, request: request)
             }.padding(16)
             Divider()
-            VStack(alignment: .leading, spacing: 8) {
-                HStack {
-                    Text("Перевод").font(.caption.weight(.semibold)).foregroundStyle(.secondary)
-                    Spacer()
-                    Text(LanguageOption.name(for: request.direction.target)).font(.caption).foregroundStyle(.secondary)
-                }
-                switch request.phase {
-                case .loading:
-                    HStack(spacing: 8) { ProgressView().controlSize(.small); Text("Переводим…").foregroundStyle(.secondary) }
-                case .ready(let result):
-                    passage(result, size: 18, limit: state.readingSize == nil ? 184 : nil, secondary: false)
-                    Button { copy(result) } label: {
-                        Label(copied ? "Скопировано" : "Скопировать", systemImage: copied ? "checkmark" : "doc.on.doc")
-                    }.controlSize(.small).padding(.top, 4)
-                case .sameLanguage:
-                    Text("Оригинал уже на выбранном языке.").foregroundStyle(.secondary)
-                case .needsDownload:
-                    Text("Для этой пары нужно скачать языки.").foregroundStyle(.secondary)
-                    Button("Загрузить и перевести") { repeatRequest(request.direction.source) }
-                case .chooseSource:
-                    Text("Выберите язык оригинала в меню выше.").foregroundStyle(.secondary)
-                case .failed(let message):
-                    Text(message).foregroundStyle(.secondary).fixedSize(horizontal: false, vertical: true)
-                    Button("Повторить") { repeatRequest(request.direction.source) }
-                }
-            }.padding(16)
+            resultBody(request, retry: repeatRequest)
         }
+    }
+
+    private func sourceMenu(_ language: String?, select: @escaping (String?) -> Void) -> some View {
+        Menu {
+            Button("Определять автоматически") { select(nil) }
+            Divider()
+            ForEach(preferences.languages) { item in Button(item.name) { select(item.id) } }
+        } label: {
+            Text(language.map(LanguageOption.name) ?? "Уточнить язык").font(.caption)
+        }.fixedSize().menuStyle(.borderlessButton).help("Изменить язык оригинала")
+    }
+
+    private func manualBody(_ manual: ManualTranslation) -> some View {
+        let translate = { (source: String?) in manual.translate(source: source, target: preferences.target) }
+        return VStack(alignment: .leading, spacing: 0) {
+            VStack(alignment: .leading, spacing: 6) {
+                HStack {
+                    Text("Оригинал").font(.caption.weight(.semibold)).foregroundStyle(.secondary)
+                    Spacer()
+                    sourceMenu(manual.source ?? manual.request?.actualSource ?? manual.request?.direction.source, select: translate)
+                }
+                ManualTextEditor(text: manual.text, dictionaryHints: preferences.dictionaryHints,
+                                 highlights: preferences.highlightOriginal ? manual.request?.highlightedWords ?? [] : [],
+                                 clearHighlight: preferences.highlightOriginal ? { manual.request?.selectTranslation(nil) } : nil) {
+                    copied = false
+                    manual.edit($0, target: preferences.target)
+                }
+                    .overlay(alignment: .topLeading) {
+                        if manual.text.isEmpty {
+                            Text("Введите или вставьте текст").font(.system(size: 14)).foregroundStyle(.secondary)
+                                .padding(.leading, 5).allowsHitTesting(false).accessibilityHidden(true)
+                        }
+                    }
+                    .padding(6)
+                    .background(.background, in: RoundedRectangle(cornerRadius: 6))
+                    .frame(height: sourceHeightLimit)
+            }.padding(16)
+            Divider()
+            if let request = manual.request {
+                resultBody(request, retry: translate)
+                    .id(ObjectIdentifier(request))
+                    .task { await request.prepare() }
+                    .translationTask(request.configuration) { @Sendable [alignWords = preferences.highlightOriginal] session in
+                        await request.translate(using: session, alignWords: alignWords)
+                    }
+            } else {
+                Text("Перевод").font(.caption.weight(.semibold)).foregroundStyle(.secondary).padding(16)
+            }
+        }
+        .onChange(of: preferences.target) { _, target in manual.translate(source: manual.source, target: target) }
+    }
+
+    private func resultBody(_ request: TranslationRequest, retry: @escaping (String?) -> Void) -> some View {
+        VStack(alignment: .leading, spacing: 8) {
+            HStack {
+                Text("Перевод").font(.caption.weight(.semibold)).foregroundStyle(.secondary)
+                Spacer()
+                Text(LanguageOption.name(for: request.direction.target)).font(.caption).foregroundStyle(.secondary)
+            }
+            switch request.phase {
+            case .loading:
+                HStack(spacing: 8) { ProgressView().controlSize(.small); Text("Переводим…").foregroundStyle(.secondary) }
+            case .ready(let result):
+                passage(result, size: 18, limit: state.readingSize == nil ? 184 : nil, secondary: false, request: request)
+            case .sameLanguage:
+                Text("Оригинал уже на выбранном языке.").foregroundStyle(.secondary)
+            case .needsDownload:
+                Text("Для этой пары нужно скачать языки.").foregroundStyle(.secondary)
+                Button("Загрузить и перевести") { retry(request.direction.source) }
+            case .chooseSource:
+                Text("Выберите язык оригинала в меню выше.").foregroundStyle(.secondary)
+            case .failed(let message):
+                Text(message).foregroundStyle(.secondary).fixedSize(horizontal: false, vertical: true)
+                Button("Повторить") { retry(request.direction.source) }
+            }
+        }.padding(16)
     }
 
     private var sourceHeightLimit: CGFloat {
@@ -281,9 +574,12 @@ struct PanelView: View {
         return max(32, (size.height / preferences.panelZoom.factor - 120) * 0.30)
     }
 
-    @ViewBuilder private func passage(_ text: String, size: CGFloat, limit: CGFloat?, secondary: Bool) -> some View {
-        let label = Text(verbatim: text).font(.system(size: size)).textSelection(.enabled)
-            .foregroundStyle(secondary ? Color.secondary : Color.primary)
+    @ViewBuilder private func passage(_ text: AttributedString, size: CGFloat, limit: CGFloat?, secondary: Bool,
+                                      request: TranslationRequest) -> some View {
+        let label = PassageTextView(text: text, fontSize: size, secondary: secondary,
+                                    dictionaryHints: secondary && preferences.dictionaryHints,
+                                    highlights: secondary && preferences.highlightOriginal ? request.highlightedWords : [],
+                                    select: preferences.highlightOriginal ? { request.selectTranslation(secondary ? nil : $0) } : nil)
             .fixedSize(horizontal: false, vertical: true)
             .frame(maxWidth: .infinity, alignment: .leading)
         if let limit {
@@ -297,15 +593,19 @@ struct PanelView: View {
         }
     }
 
-    private func copy(_ text: String) {
-        NSPasteboard.general.clearContents()
-        copied = NSPasteboard.general.setString(text, forType: .string)
+    private func copy(_ text: AttributedString) {
+        copied = Passage.copy(text, to: .general)
     }
 }
 
 final class TranslationPanel: NSPanel {
     override var canBecomeKey: Bool { true }
     override var canBecomeMain: Bool { false }
+    var keepsPosition = false
+    override func performDrag(with event: NSEvent) {
+        keepsPosition = true
+        super.performDrag(with: event)
+    }
     var onEscape: (() -> Void)?
     override func cancelOperation(_ sender: Any?) { onEscape?() }
     override func keyDown(with event: NSEvent) {
