@@ -6,7 +6,7 @@ myHomeTranslater — переводчик для **macOS 15 и новее**, к�
 
 Перевод выполняет **Apple Translation** на Mac. При первом использовании языковой пары macOS предложит загрузить нужные пакеты. После загрузки этой парой можно пользоваться офлайн. По умолчанию русский текст переводится на английский, а текст на других поддерживаемых языках — на русский.
 
-**[Скачать myHomeTranslater 1.4.0 для macOS (ZIP)](https://github.com/Miretty007/myHomeTranslater/releases/download/v1.4.0/myHomeTranslater-1.4.0-macOS.zip)** · [Страница релиза](https://github.com/Miretty007/myHomeTranslater/releases/tag/v1.4.0)
+**[Скачать myHomeTranslater 1.4.1 для macOS (ZIP)](https://github.com/Miretty007/myHomeTranslater/releases/download/v1.4.1/myHomeTranslater-1.4.1-macOS.zip)** · [Страница релиза](https://github.com/Miretty007/myHomeTranslater/releases/tag/v1.4.1)
 
 <img src="docs/screenshots/word-selection-light.png" width="460" alt="Перевод английской фразы на русский. Щелчок по слову «молоко» подсветил milk в оригинале.">
 

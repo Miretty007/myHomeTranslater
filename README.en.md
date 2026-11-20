@@ -6,7 +6,7 @@ myHomeTranslater is a menu bar translator for **macOS 15 or later**. Select a pa
 
 Apple Translation runs on your Mac. The first time you use a language pair, macOS may ask you to download the languages. Once downloaded, the pair works offline. By default, Russian text is translated into English, and text in other supported languages is translated into Russian.
 
-**[Download myHomeTranslater 1.4.0 for macOS (ZIP)](https://github.com/Miretty007/myHomeTranslater/releases/download/v1.4.0/myHomeTranslater-1.4.0-macOS.zip)** · [Release notes](https://github.com/Miretty007/myHomeTranslater/releases/tag/v1.4.0)
+**[Download myHomeTranslater 1.4.1 for macOS (ZIP)](https://github.com/Miretty007/myHomeTranslater/releases/download/v1.4.1/myHomeTranslater-1.4.1-macOS.zip)** · [Release notes](https://github.com/Miretty007/myHomeTranslater/releases/tag/v1.4.1)
 
 <img src="docs/screenshots/en/word-selection-light.png" width="460" alt="The translation panel highlights the word “milk” in “The black cat drinks milk.” The Russian translation appears below.">
 

@@ -15,12 +15,12 @@ struct Selection: Sendable, Equatable {
 
 // AX requests can wait on another app. Keep them off the window's main thread.
 actor SelectionReader {
-    func read(pid: pid_t) -> Selection? {
+    private var activationDeadlines: [pid_t: ContinuousClock.Instant] = [:]
+
+    func read(pid: pid_t) async -> Selection? {
         let app = AXUIElementCreateApplication(pid)
         AXUIElementSetMessagingTimeout(app, 0.25)
-        guard let object = attribute(app, kAXFocusedUIElementAttribute),
-              CFGetTypeID(object) == AXUIElementGetTypeID() else { return nil }
-        var element = object as! AXUIElement
+        guard var element = await focusedElement(in: app, pid: pid) else { return nil }
         for _ in 0..<5 {
             if attribute(element, kAXSubroleAttribute) as? String == kAXSecureTextFieldSubrole { return nil }
             if let selection = selection(in: element, pid: pid) { return selection }
@@ -28,6 +28,37 @@ actor SelectionReader {
             element = parent as! AXUIElement
         }
         return nil
+    }
+
+    private func focusedElement(in app: AXUIElement, pid: pid_t) async -> AXUIElement? {
+        let key = kAXFocusedUIElementAttribute as CFString
+        var focus: CFTypeRef?
+        var status = AXUIElementCopyAttributeValue(app, key, &focus)
+        if status == .noValue,
+           let id = NSRunningApplication(processIdentifier: pid)?.bundleIdentifier,
+           id == "com.google.Chrome" || id.hasPrefix("com.google.Chrome.") || id == "com.openai.codex" {
+            // Chromium debounces this request for two seconds. Reissuing it on
+            // each selection would postpone activation while the user is dragging.
+            let now = ContinuousClock.now
+            activationDeadlines = activationDeadlines.filter { $0.value > now }
+            let deadline: ContinuousClock.Instant
+            if let pending = activationDeadlines[pid] {
+                deadline = pending
+            } else {
+                let result = AXUIElementSetAttributeValue(app, "AXEnhancedUserInterface" as CFString, kCFBooleanTrue)
+                // Chrome can schedule activation and still return notImplemented.
+                guard result == .success || result == .notImplemented else { return nil }
+                deadline = now + .seconds(3)
+                activationDeadlines[pid] = deadline
+            }
+            while status == .noValue, ContinuousClock.now < deadline {
+                do { try await Task.sleep(for: .milliseconds(100)) } catch { return nil }
+                status = AXUIElementCopyAttributeValue(app, key, &focus)
+            }
+        }
+        guard !Task.isCancelled, status == .success, let focus,
+              CFGetTypeID(focus) == AXUIElementGetTypeID() else { return nil }
+        return (focus as! AXUIElement)
     }
 
     private func selection(in element: AXUIElement, pid: pid_t) -> Selection? {

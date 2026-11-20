@@ -282,9 +282,13 @@ final class AppController: NSObject, NSApplicationDelegate, NSMenuDelegate {
             return
         }
         guard watchesSelection, AXIsProcessTrusted(), !preferences.recordingShortcut else { return }
+        if event.type == .leftMouseUp {
+            readSelection(automatic: true)
+            return
+        }
         let selectionKey = event.modifierFlags.contains(.shift)
             || (event.modifierFlags.contains(.command) && event.keyCode == 0)
-        if event.type == .leftMouseUp || (event.type == .keyUp && selectionKey) { readSelection(automatic: true) }
+        if event.type == .keyUp && selectionKey { readSelection(automatic: true) }
         if event.type == .keyDown {
             pending?.cancel()
             if passivePanel && !selectionKey { dismissPanel() }
@@ -905,7 +909,7 @@ extension AppController {
         let browser = Process()
         browser.executableURL = URL(fileURLWithPath: "/Applications/Google Chrome.app/Contents/MacOS/Google Chrome")
         browser.arguments = ["--app=" + page.absoluteString, "--user-data-dir=" + folder.appendingPathComponent("profile").path,
-                             "--force-renderer-accessibility", "--no-first-run", "--no-default-browser-check",
+                             "--no-first-run", "--no-default-browser-check",
                              "--disable-background-networking", "--disable-sync"]
         browser.standardOutput = FileHandle.nullDevice
         browser.standardError = FileHandle.nullDevice
@@ -934,6 +938,8 @@ extension AppController {
         }
         for type in [CGEventType.leftMouseDown, .leftMouseUp] {
             let event = CGEvent(mouseEventSource: nil, mouseType: type, mouseCursorPosition: point, mouseButton: .left)
+            // Mouse events can carry Command but have no keyboard key code.
+            event?.flags = .maskCommand
             event?.setIntegerValueField(.mouseEventClickState, value: 2)
             event?.post(tap: .cghidEventTap)
         }
@@ -964,7 +970,21 @@ extension AppController {
             }
             guard case .ready(let translated) = request?.phase, !translated.characters.isEmpty else { throw CocoaError(.formatting) }
         }
-        return "Chrome mouse and keyboard selections updated the same pinned window with browser focus retained"
+        dismissPanel(explicit: true)
+        guard request == nil, browserIsActive() else { throw CocoaError(.formatting) }
+        for down in [true, false] {
+            let event = CGEvent(keyboardEventSource: nil, virtualKey: CGKeyCode(kVK_ANSI_8), keyDown: down)
+            event?.flags = [.maskCommand, .maskControl, .maskAlternate]
+            event?.post(tap: .cghidEventTap)
+        }
+        let deadline = ContinuousClock.now + .seconds(3)
+        while request?.text != "See you tomorrow", ContinuousClock.now < deadline {
+            try await Task.sleep(for: .milliseconds(40))
+        }
+        guard request?.text == "See you tomorrow", !passivePanel, panel.isVisible else {
+            throw CocoaError(.formatting, userInfo: [NSLocalizedDescriptionKey: "The global shortcut did not present the selected Chrome text"])
+        }
+        return "Chrome mouse and keyboard selections updated the pinned window; the global shortcut reopened it with the selected text"
     }
 
     // Dispatch locally to the text view in this verification window.

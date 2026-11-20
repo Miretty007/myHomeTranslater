@@ -51,6 +51,7 @@ private func readFixture(backwards: Bool, partial: Bool) async throws -> Attribu
       const end = [last, last.length - \(partial ? 5 : 0)];
       const points = \(backwards ? "[...end, ...start]" : "[...start, ...end]");
       getSelection().setBaseAndExtent(...points);
+      if (!getSelection().isCollapsed) document.title = 'Selection ready';
     });
     </script>
     """
@@ -58,7 +59,7 @@ private func readFixture(backwards: Bool, partial: Bool) async throws -> Attribu
     let browser = Process()
     browser.executableURL = URL(fileURLWithPath: "/Applications/Google Chrome.app/Contents/MacOS/Google Chrome")
     browser.arguments = ["--user-data-dir=" + directory.appendingPathComponent("profile").path,
-                         "--app=" + page.absoluteString, "--force-renderer-accessibility", "--no-first-run",
+                         "--app=" + page.absoluteString, "--no-first-run",
                          "--no-default-browser-check", "--disable-background-networking", "--disable-sync"]
     browser.standardOutput = FileHandle.nullDevice
     browser.standardError = FileHandle.nullDevice
@@ -67,11 +68,19 @@ private func readFixture(backwards: Bool, partial: Bool) async throws -> Attribu
         if browser.isRunning { browser.terminate() }
         browser.waitUntilExit()
     }
-    let reader = SelectionReader()
+    // Wait for the DOM selection without enabling renderer accessibility or warming up the reader.
+    let app = AXUIElementCreateApplication(browser.processIdentifier)
     for _ in 0..<40 {
         try await Task.sleep(for: .milliseconds(200))
-        if let selection = await reader.read(pid: browser.processIdentifier),
-           !selection.text.characters.isEmpty { return selection.text }
+        var window: CFTypeRef?
+        var title: CFTypeRef?
+        if AXUIElementCopyAttributeValue(app, kAXFocusedWindowAttribute as CFString, &window) == .success,
+           let window, CFGetTypeID(window) == AXUIElementGetTypeID(),
+           AXUIElementCopyAttributeValue(window as! AXUIElement, kAXTitleAttribute as CFString, &title) == .success,
+           (title as? String)?.contains("Selection ready") == true {
+            let selection = await SelectionReader().read(pid: browser.processIdentifier)
+            return try #require(selection, "First read of the selected web text in a fresh Chrome process").text
+        }
     }
-    throw CocoaError(.fileReadUnknown, userInfo: [NSLocalizedDescriptionKey: "Chrome did not expose the fixture selection"])
+    throw CocoaError(.fileReadUnknown, userInfo: [NSLocalizedDescriptionKey: "The fixture did not select the test text"])
 }
